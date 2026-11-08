@@ -36,6 +36,11 @@ type ImmichConfig struct {
 	APIKeyFile string `json:"apiKeyFile"`
 }
 
+type UpdateConfig struct {
+	Repo      string `json:"repo"`      // GitHub owner/repo with releases
+	TokenFile string `json:"tokenFile"` // optional token for private repos (read-only)
+}
+
 type Config struct {
 	Listen             []string        `json:"listen"`
 	TLSCert            string          `json:"tlsCert"`
@@ -48,6 +53,7 @@ type Config struct {
 	Kopia              KopiaConfig     `json:"kopia"`
 	Nextcloud          NextcloudConfig `json:"nextcloud"`
 	Immich             ImmichConfig    `json:"immich"`
+	Update             UpdateConfig    `json:"update"`
 }
 
 type ConfigStore struct {
@@ -70,6 +76,7 @@ func defaultConfig(dir string) Config {
 			OCC:     []string{"runuser", "-u", "www-data", "--", "php", "/var/www/nextcloud/occ"},
 		},
 		Immich: ImmichConfig{Enabled: false, URL: "http://127.0.0.1:2283", APIKeyFile: filepath.Join(dir, "immich.key")},
+		Update: UpdateConfig{Repo: "apk-creator/servercontrol", TokenFile: filepath.Join(dir, "github.token")},
 	}
 }
 
@@ -91,17 +98,34 @@ func LoadConfig(path string) (*ConfigStore, error) {
 	if c.Kopia.Binary == "" {
 		c.Kopia.Binary = "kopia"
 	}
+	dir := filepath.Dir(path)
+	if c.Immich.APIKeyFile == "" {
+		c.Immich.APIKeyFile = filepath.Join(dir, "immich.key")
+	}
+	if c.Update.Repo == "" {
+		c.Update.Repo = "apk-creator/servercontrol"
+	}
+	if c.Update.TokenFile == "" {
+		c.Update.TokenFile = filepath.Join(dir, "github.token")
+	}
+	if len(c.Nextcloud.OCC) == 0 {
+		c.Nextcloud.OCC = defaultConfig(dir).Nextcloud.OCC
+	}
 	if c.PasswordHash == "" {
 		return nil, errors.New("no password set – run: servercontrol-agent -passwd")
 	}
 	return &ConfigStore{path: path, cfg: c}, nil
 }
 
+// Dir is the directory of the config file (/etc/servercontrol).
+func (s *ConfigStore) Dir() string { return filepath.Dir(s.path) }
+
 func (s *ConfigStore) Get() Config {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	c := s.cfg
 	c.Kopia.Repos = append([]KopiaRepo(nil), s.cfg.Kopia.Repos...)
+	c.Nextcloud.OCC = append([]string(nil), s.cfg.Nextcloud.OCC...)
 	return c
 }
 
@@ -111,6 +135,7 @@ func (s *ConfigStore) Update(fn func(*Config) error) error {
 	defer s.mu.Unlock()
 	c := s.cfg
 	c.Kopia.Repos = append([]KopiaRepo(nil), s.cfg.Kopia.Repos...)
+	c.Nextcloud.OCC = append([]string(nil), s.cfg.Nextcloud.OCC...)
 	if err := fn(&c); err != nil {
 		return err
 	}
@@ -131,6 +156,18 @@ func writeConfig(path string, c Config) error {
 	}
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, append(b, '\n'), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+// writeSecret stores a secret (API key, password, token) in a root-only file.
+func writeSecret(path, value string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(value+"\n"), 0o600); err != nil {
 		return err
 	}
 	return os.Rename(tmp, path)

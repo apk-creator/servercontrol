@@ -41,3 +41,32 @@ expect fun CredentialFields(
 )
 
 expect val isDesktop: Boolean
+
+// ---------------- SSH ----------------
+
+/** An interactive SSH shell (PTY). */
+interface SshShell {
+    /** Blocks until data arrives; -1 = closed */
+    suspend fun read(buf: ByteArray): Int
+    suspend fun write(data: ByteArray)
+    fun resize(cols: Int, rows: Int)
+    fun close()
+}
+
+class SshAuth(val user: String, val password: String?, val privateKey: String?, val passphrase: String?)
+
+/** Host key not yet trusted – ask the user, then reconnect with [fingerprint]. */
+class SshHostKeyUnknown(val fingerprint: String, val keyType: String) : Exception("Unbekannter Hostschlüssel $keyType $fingerprint")
+
+/** Host key differs from the pinned one – possible man-in-the-middle. */
+class SshHostKeyChanged(val fingerprint: String) : Exception("Der SSH-Hostschlüssel des Servers hat sich geändert ($fingerprint)! Verbindung abgebrochen.")
+
+/** Opens an SSH session with a PTY. [knownHostKey] = "SHA256:…" fingerprint, empty on first use. */
+expect suspend fun openSsh(host: String, port: Int, auth: SshAuth, knownHostKey: String, cols: Int, rows: Int): SshShell
+
+/** Single secret input (API key, repository password, token) – autofill-capable like [CredentialFields]. */
+@Composable
+expect fun SecretField(value: String, onValue: (String) -> Unit, label: String)
+
+/** Lets the user pick a file; returns its content or null. */
+expect suspend fun pickFile(): ByteArray?

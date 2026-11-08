@@ -17,7 +17,8 @@ import (
 	"time"
 )
 
-var version = "0.1.0"
+// set at build time: -ldflags "-X main.version=1.2.3"
+var version = "0.0.0-dev"
 
 type Server struct {
 	cfg  *ConfigStore
@@ -157,6 +158,20 @@ func (s *Server) routes() http.Handler {
 	priv.HandleFunc("GET /api/nextcloud/updatecheck", s.handleNcUpdateCheck)
 	priv.HandleFunc("GET /api/nextcloud/background", s.handleNcBackgroundMode)
 	priv.HandleFunc("POST /api/nextcloud/action/{action}", s.handleNcAction)
+	priv.HandleFunc("GET /api/kopia/discover", s.handleKopiaDiscover)
+	priv.HandleFunc("POST /api/kopia/connect", s.handleKopiaConnect)
+	priv.HandleFunc("POST /api/kopia/repos/{repo}/password", s.handleKopiaPassword)
+	// configuration from the app
+	priv.HandleFunc("GET /api/config", s.handleConfigGet)
+	priv.HandleFunc("POST /api/config/nextcloud/test", s.handleNcConfigTest)
+	priv.HandleFunc("PUT /api/config/nextcloud", s.handleNcConfigSave)
+	priv.HandleFunc("POST /api/config/immich/test", s.handleImmichConfigTest)
+	priv.HandleFunc("PUT /api/config/immich", s.handleImmichConfigSave)
+	priv.HandleFunc("PUT /api/config/update", s.handleUpdateConfigSave)
+	// self-update
+	priv.HandleFunc("GET /api/agent/update/check", s.handleUpdateCheck)
+	priv.HandleFunc("POST /api/agent/update/install", s.handleUpdateInstall)
+	priv.HandleFunc("POST /api/agent/update/upload", s.handleUpdateUpload)
 	// immich (allowlisted proxy)
 	priv.HandleFunc("/api/immich/{path...}", s.handleImmich)
 

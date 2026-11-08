@@ -22,8 +22,11 @@ jobs:
         working-directory: agent
         run: |
           go vet ./...
+          go test ./...
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then VER="${GITHUB_REF_NAME#v}"; else VER="0.0.0-${GITHUB_SHA::7}"; fi
+          echo "Agent-Version: $VER"
           for arch in amd64 arm64; do
-            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags "-s -w" -o ../dist/servercontrol-agent-linux-$arch .
+            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags "-s -w -X main.version=$VER" -o ../dist/servercontrol-agent-linux-$arch .
           done
       - name: Package
         run: |

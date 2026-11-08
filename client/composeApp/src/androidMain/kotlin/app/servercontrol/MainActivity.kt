@@ -35,6 +35,11 @@ class MainActivity : ComponentActivity() {
         // no screenshots / no preview in the recent-apps list
         window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
         val app = application as ServerControlApp
+        FilePicker.context = applicationContext
+        FilePicker.launcher = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetContent()) { uri ->
+            FilePicker.pending?.complete(uri)
+            FilePicker.pending = null
+        }
         if (!app.vpn.hasPermission()) {
             runCatching { requestPermissions(arrayOf(AndroidVpn.PERMISSION), 1) }
         }

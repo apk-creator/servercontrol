@@ -204,6 +204,8 @@ fun LoginScreen(state: AppState, profile: ServerProfile) {
 
 fun Section.icon(): ImageVector = when (this) {
     Section.OVERVIEW -> Icons.Default.Dashboard
+    Section.TERMINAL -> Icons.Default.Terminal
+    Section.AGENT -> Icons.Default.Settings
     Section.SERVICES -> Icons.Default.SettingsApplications
     Section.CONTAINERS -> Icons.Default.ViewInAr
     Section.LOGS -> Icons.AutoMirrored.Filled.List
@@ -216,7 +218,7 @@ fun Section.icon(): ImageVector = when (this) {
     Section.NEXTCLOUD -> Icons.Default.Cloud
     Section.IMMICH -> Icons.Default.PhotoLibrary
     Section.JOBS -> Icons.Default.Pending
-    Section.SHELL -> Icons.Default.Terminal
+    Section.SHELL -> Icons.Default.Code
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -291,6 +293,8 @@ fun SectionContent(state: AppState, session: Session) {
     val api = session.api
     when (state.section) {
         Section.OVERVIEW -> OverviewScreen(api) { state.section = it }
+        Section.TERMINAL -> TerminalScreen(state, session)
+        Section.AGENT -> AgentScreen(api)
         Section.SERVICES -> ServicesScreen(api)
         Section.CONTAINERS -> ContainersScreen(api)
         Section.LOGS -> LogsScreen(api)

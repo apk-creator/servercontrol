@@ -30,6 +30,14 @@ data class ServerProfile(
     /** Desktop only: commands to bring the tunnel up/down, {tunnel} is replaced */
     val vpnUpCommand: String = "",
     val vpnDownCommand: String = "",
+    /** SSH terminal (host = same address as the agent) */
+    val sshPort: Int = 22,
+    val sshUser: String = "",
+    /** pinned SSH host key, "SHA256:…" */
+    val sshHostKey: String = "",
+    val sshHostKeyType: String = "",
+    /** optional private key (OpenSSH/PEM), stored encrypted like everything else in the vault */
+    val sshPrivateKey: String = "",
 )
 
 @Serializable
