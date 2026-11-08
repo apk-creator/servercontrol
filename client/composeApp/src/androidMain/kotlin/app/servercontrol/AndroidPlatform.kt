@@ -176,8 +176,9 @@ actual fun CredentialFields(
             }
         },
         update = { layout ->
-            @Suppress("UNCHECKED_CAST")
-            val (user, pass) = layout.tag as Pair<EditText, EditText>
+            val pair = layout.tag as Pair<*, *>
+            val user = pair.first as EditText
+            val pass = pair.second as EditText
             if (user.text.toString() != username) user.setText(username)
             if (pass.text.toString() != password) pass.setText(password)
         },
