@@ -1,0 +1,108 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  agent:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - name: Vet & build
+        working-directory: agent
+        run: |
+          go vet ./...
+          for arch in amd64 arm64; do
+            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags "-s -w" -o ../dist/servercontrol-agent-linux-$arch .
+          done
+      - name: Package
+        run: |
+          mkdir -p pkg && cp dist/* deploy/* pkg/
+          tar -C pkg -czf servercontrol-agent.tar.gz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: servercontrol-agent
+          path: servercontrol-agent.tar.gz
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Signing key from secrets (optional)
+        env:
+          KS: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KS" ]; then echo "$KS" | base64 -d > $RUNNER_TEMP/release.keystore; echo "SIGNING_KEYSTORE_FILE=$RUNNER_TEMP/release.keystore" >> $GITHUB_ENV; fi
+      - name: Build APK
+        working-directory: client
+        env:
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon :composeApp:assembleRelease
+          cp composeApp/build/outputs/apk/release/composeApp-release.apk ../ServerControl.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ServerControl-android
+          path: ServerControl.apk
+
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            task: packageReleaseDeb
+            glob: client/composeApp/build/compose/binaries/main-release/deb/*.deb
+            name: ServerControl-linux-deb
+          - os: windows-latest
+            task: packageReleaseMsi
+            glob: client/composeApp/build/compose/binaries/main-release/msi/*.msi
+            name: ServerControl-windows-msi
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Package
+        working-directory: client
+        shell: bash
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon :composeApp:${{ matrix.task }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ matrix.glob }}
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [agent, android, desktop]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: out/**/*
