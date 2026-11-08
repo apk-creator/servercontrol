@@ -58,11 +58,11 @@ android {
         create("ci") {
             // Stable signing key so updates install over the previous version.
             // Prefer GitHub secrets; fall back to the keystore in the (private) repo.
-            val ks = System.getenv("SIGNING_KEYSTORE_FILE")
-            storeFile = if (ks != null) file(ks) else file("signing/servercontrol.keystore")
-            storePassword = System.getenv("SIGNING_STORE_PASSWORD") ?: "servercontrol"
-            keyAlias = System.getenv("SIGNING_KEY_ALIAS") ?: "servercontrol"
-            keyPassword = System.getenv("SIGNING_KEY_PASSWORD") ?: "servercontrol"
+            fun env(name: String) = System.getenv(name)?.takeIf { it.isNotBlank() }
+            storeFile = env("SIGNING_KEYSTORE_FILE")?.let { file(it) } ?: file("signing/servercontrol.keystore")
+            storePassword = env("SIGNING_STORE_PASSWORD") ?: "servercontrol"
+            keyAlias = env("SIGNING_KEY_ALIAS") ?: "servercontrol"
+            keyPassword = env("SIGNING_KEY_PASSWORD") ?: "servercontrol"
         }
     }
     buildTypes {
@@ -86,6 +86,7 @@ android {
 compose.desktop {
     application {
         mainClass = "app.servercontrol.MainKt"
+        buildTypes.release.proguard { isEnabled.set(false) }
         nativeDistributions {
             targetFormats(TargetFormat.Deb, TargetFormat.Msi)
             packageName = "ServerControl"
