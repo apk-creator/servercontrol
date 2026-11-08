@@ -1,0 +1,19 @@
+[Unit]
+Description=ServerControl Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/servercontrol-agent -config /etc/servercontrol/agent.json
+Restart=on-failure
+RestartSec=5
+# The agent needs root for systemctl, apt, smartctl, kopia and occ.
+User=root
+UMask=0077
+NoNewPrivileges=false
+ProtectHome=read-only
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

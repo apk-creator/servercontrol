@@ -1,0 +1,14 @@
+# Gradle / IDE
+.gradle/
+build/
+.idea/
+*.iml
+local.properties
+.kotlin/
+# Go
+/dist/
+# never commit real configs or secrets
+agent.json
+*.pw
+immich.key
+tls.key

@@ -1,0 +1,139 @@
+package app.servercontrol
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material3.Button
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Window
+import androidx.compose.ui.window.application
+import androidx.compose.ui.window.rememberWindowState
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
+
+fun main() = application {
+    val scope = remember { CoroutineScope(SupervisorJob() + Dispatchers.Main) }
+    val vpn = remember { DesktopVpn() }
+    var state by remember { mutableStateOf<AppState?>(null) }
+    val windowState = rememberWindowState(size = DpSize(1180.dp, 800.dp))
+
+    val s = state
+    // Window title is what KeePassXC Auto-Type matches on.
+    val title = when (val scr = s?.screen) {
+        null -> "ServerControl – Entsperren"
+        is Screen.Login -> "ServerControl – Login ${scr.profile.name}"
+        else -> "ServerControl"
+    }
+
+    Window(
+        onCloseRequest = {
+            runBlocking { withTimeoutOrNull(10_000) { state?.shutdown() } }
+            exitApplication()
+        },
+        title = title,
+        state = windowState,
+    ) {
+        // Minimised for 5 minutes → session paused and VPN off (if the app switched it on).
+        LaunchedEffect(windowState.isMinimized, s) {
+            if (s == null) return@LaunchedEffect
+            if (windowState.isMinimized) s.onBackground(5 * 60_000) else s.onForeground()
+        }
+        if (s == null) {
+            UnlockScreen { pass ->
+                val store = DesktopSecureStore(pass)
+                // throws WrongPassphraseException; on first run create the (empty) vault right away
+                if (store.load() == null) store.save("{\"profiles\":[]}")
+                state = AppState(store, vpn, scope)
+            }
+        } else {
+            App(s)
+        }
+    }
+}
+
+@Composable
+fun UnlockScreen(onUnlock: suspend (CharArray) -> Unit) {
+    val firstRun = remember { !DesktopSecureStore.exists() }
+    var pw by remember { mutableStateOf("") }
+    var pw2 by remember { mutableStateOf("") }
+    var err by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val focus = remember { FocusRequester() }
+    val submit = {
+        if (!busy) {
+            when {
+                firstRun && pw.length < 12 -> err = "Mindestens 12 Zeichen."
+                firstRun && pw != pw2 -> err = "Passwörter stimmen nicht überein."
+                else -> {
+                    busy = true
+                    scope.launch {
+                        try {
+                            onUnlock(pw.toCharArray())
+                        } catch (e: WrongPassphraseException) {
+                            err = e.message
+                        } catch (e: Throwable) {
+                            err = e.message ?: e.toString()
+                        } finally {
+                            busy = false
+                        }
+                    }
+                }
+            }
+        }
+        Unit
+    }
+    val enter = Modifier.onPreviewKeyEvent { e ->
+        if (e.type == KeyEventType.KeyDown && (e.key == Key.Enter || e.key == Key.NumPadEnter)) { submit(); true } else false
+    }
+    AppTheme {
+        Surface(Modifier.fillMaxSize()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(Modifier.widthIn(max = 420.dp).padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("ServerControl", style = MaterialTheme.typography.headlineMedium)
+                    Text(
+                        if (firstRun) "Lege ein Master-Passwort fest. Damit werden die Server-Adressen auf diesem Rechner verschlüsselt (am besten in KeePass speichern)."
+                        else "Master-Passwort eingeben (KeePassXC Auto-Type möglich).",
+                    )
+                    OutlinedTextField(pw, { pw = it }, Modifier.fillMaxWidth().focusRequester(focus).then(enter),
+                        label = { Text("Master-Passwort") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
+                    if (firstRun) OutlinedTextField(pw2, { pw2 = it }, Modifier.fillMaxWidth().then(enter),
+                        label = { Text("Wiederholen") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
+                    Button(onClick = submit, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text(if (firstRun) "Festlegen" else "Entsperren") }
+                    err?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                }
+            }
+        }
+    }
+    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+}

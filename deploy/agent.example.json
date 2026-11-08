@@ -1,0 +1,28 @@
+{
+  "listen": ["192.168.1.10:8443", "10.8.0.1:8443"],
+  "tlsCert": "/etc/servercontrol/tls.crt",
+  "tlsKey": "/etc/servercontrol/tls.key",
+  "user": "admin",
+  "passwordHash": "(wird von -init / -passwd gesetzt)",
+  "sessionIdleMinutes": 30,
+  "sessionMaxHours": 12,
+  "allowShell": false,
+  "kopia": {
+    "binary": "kopia",
+    "repos": [
+      { "id": "ssd1", "name": "SSD 1 → HDD 1", "configFile": "/root/.config/kopia/ssd1.config",
+        "passwordFile": "/etc/servercontrol/kopia-ssd1.pw", "sources": ["/mnt/ssd1"] },
+      { "id": "ssd2", "name": "SSD 2 → HDD 2", "configFile": "/root/.config/kopia/ssd2.config",
+        "passwordFile": "/etc/servercontrol/kopia-ssd2.pw", "sources": ["/mnt/ssd2"] }
+    ]
+  },
+  "nextcloud": {
+    "enabled": true,
+    "occ": ["runuser", "-u", "www-data", "--", "php", "/var/www/nextcloud/occ"]
+  },
+  "immich": {
+    "enabled": true,
+    "url": "http://127.0.0.1:2283",
+    "apiKeyFile": "/etc/servercontrol/immich.key"
+  }
+}
