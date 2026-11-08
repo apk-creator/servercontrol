@@ -8,7 +8,7 @@ plugins {
     id("com.android.application")
 }
 
-val appVersion = "0.1.0"
+val appVersion = "1.0.0"
 val ktor = "3.1.3"
 
 kotlin {
@@ -87,7 +87,7 @@ compose.desktop {
     application {
         mainClass = "app.servercontrol.MainKt"
         nativeDistributions {
-            targetFormats(TargetFormat.Deb, TargetFormat.Msi, TargetFormat.Dmg)
+            targetFormats(TargetFormat.Deb, TargetFormat.Msi)
             packageName = "ServerControl"
             packageVersion = appVersion
             description = "ServerControl – Debian-Server-Verwaltung"
