@@ -101,7 +101,7 @@ fun <T> Loader(
         }
         loading = false
     }
-    val reload = { tick++ }
+    val reload: () -> Unit = { tick++ }
     Column(Modifier.fillMaxSize()) {
         if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
         err?.let { ErrorCard(it, reload) }
