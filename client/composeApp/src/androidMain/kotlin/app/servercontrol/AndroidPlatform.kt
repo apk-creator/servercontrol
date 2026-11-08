@@ -190,3 +190,40 @@ private class SimpleWatcher(val cb: (String) -> Unit) : android.text.TextWatcher
     override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
     override fun afterTextChanged(s: android.text.Editable?) = cb(s?.toString() ?: "")
 }
+
+@Composable
+actual fun SecretField(value: String, onValue: (String) -> Unit, label: String) {
+    val cb = rememberUpdatedState(onValue)
+    AndroidView(
+        modifier = Modifier.fillMaxWidth(),
+        factory = { ctx ->
+            EditText(ctx).apply {
+                hint = label
+                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+                setSingleLine(true)
+                setAutofillHints(View.AUTOFILL_HINT_PASSWORD)
+                importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_YES
+                addTextChangedListener(SimpleWatcher { cb.value(it) })
+            }
+        },
+        update = { et -> if (et.text.toString() != value) et.setText(value) },
+    )
+}
+
+/** Bridge to the activity's file picker (registered in MainActivity). */
+object FilePicker {
+    var launcher: androidx.activity.result.ActivityResultLauncher<String>? = null
+    var pending: kotlinx.coroutines.CompletableDeferred<android.net.Uri?>? = null
+    lateinit var context: Context
+}
+
+actual suspend fun pickFile(): ByteArray? {
+    val l = FilePicker.launcher ?: return null
+    val d = kotlinx.coroutines.CompletableDeferred<android.net.Uri?>()
+    FilePicker.pending = d
+    l.launch("*/*")
+    val uri = d.await() ?: return null
+    return withContext(Dispatchers.IO) {
+        FilePicker.context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+    }
+}

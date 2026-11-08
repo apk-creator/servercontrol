@@ -42,13 +42,13 @@ private val jobNames = mapOf(
 )
 
 @Composable
-fun ImmichScreen(api: ApiClient) {
+fun ImmichMain(api: ApiClient, onSetup: () -> Unit) {
     var tab by remember { mutableStateOf(0) }
     val host = rememberActionHost { api }
     var confirm by remember { mutableStateOf<Confirm?>(null) }
     Column(Modifier.fillMaxSize()) {
         ScrollableTabRow(selectedTabIndex = tab, edgePadding = 8.dp) {
-            listOf("Status", "Aufträge", "Benutzer", "Bibliotheken").forEachIndexed { i, t ->
+            listOf("Status", "Aufträge", "Benutzer", "Bibliotheken", "Einrichtung").forEachIndexed { i, t ->
                 Tab(selected = tab == i, onClick = { tab = i }, text = { Text(t) })
             }
         }
@@ -57,6 +57,7 @@ fun ImmichScreen(api: ApiClient) {
             1 -> ImmichJobs(api, host)
             2 -> ImmichUsers(api, host) { confirm = it }
             3 -> ImmichLibraries(api, host)
+            4 -> LaunchedEffect(Unit) { tab = 0; onSetup() }
         }
     }
     ConfirmDialog(confirm) { confirm = null }
@@ -229,6 +230,23 @@ private fun ImmichLibraries(api: ApiClient, host: ActionHost) {
                     SmallButton("Jetzt scannen", { host.post("Scan ${l["name"].str}", "$IM/libraries/${l["id"].str}/scan") })
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun ImmichScreen(api: ApiClient) {
+    var refresh by remember { mutableStateOf(0) }
+    var setup by remember { mutableStateOf(false) }
+    Loader(refresh, { api.getJson("/api/config") }) { cfg, _ ->
+        val mod = cfg["immich"]
+        if (mod["enabled"].bool != true || setup) {
+            Column(Modifier.fillMaxSize()) {
+                if (setup) TextButton(onClick = { setup = false }) { Text("← Zurück") }
+                ImmichSetup(api, mod) { setup = false; refresh++ }
+            }
+        } else {
+            ImmichMain(api) { setup = true }
         }
     }
 }

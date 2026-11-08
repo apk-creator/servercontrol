@@ -28,16 +28,23 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.servercontrol.Bold
 import app.servercontrol.ButtonRow
+import app.servercontrol.SecretField
 import app.servercontrol.SmallButton
 import app.servercontrol.data.*
 import app.servercontrol.net.ApiClient
 import app.servercontrol.ui.*
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 @Composable
 fun KopiaScreen(api: ApiClient) {
     var open by remember { mutableStateOf<KopiaRepo?>(null) }
     var edit by remember { mutableStateOf<KopiaRepoDef?>(null) }
     var refresh by remember { mutableStateOf(0) }
+    var discover by remember { mutableStateOf(false) }
+    var connect by remember { mutableStateOf(false) }
     val o = open
     if (o != null) {
         KopiaRepoDetail(api, o) { open = null }
@@ -48,8 +55,13 @@ fun KopiaScreen(api: ApiClient) {
             Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("${repos.size} Repositories", Modifier.weight(1f))
                 SmallButton("Neu laden", reload)
-                Spacer(Modifier.width(8.dp))
-                Button(onClick = { edit = KopiaRepoDef("", "", "/root/.config/kopia/") }) { Text("Hinzufügen") }
+            }
+            Row(Modifier.padding(horizontal = 12.dp)) {
+                ButtonRow {
+                    Button(onClick = { discover = true }) { Text("Auf dem Server suchen") }
+                    SmallButton("Verbinden / neu anlegen", { connect = true })
+                    SmallButton("Manuell (Config-Datei)", { edit = KopiaRepoDef("", "", "/root/.config/kopia/") })
+                }
             }
             if (repos.isEmpty()) Text(
                 "Noch kein Repository eingetragen. Jedes Repository braucht eine eigene Kopia-Konfigurationsdatei " +
@@ -76,6 +88,98 @@ fun KopiaScreen(api: ApiClient) {
         }
     }
     edit?.let { def -> KopiaRepoEditor(api, def, onDone = { edit = null; refresh++ }) }
+    if (discover) KopiaDiscoverDialog(api, onPick = { def -> discover = false; edit = def }, onDismiss = { discover = false })
+    if (connect) KopiaConnectDialog(api) { connect = false; refresh++ }
+}
+
+private fun idFromFile(path: String): String =
+    path.substringAfterLast('/').removeSuffix(".config").lowercase().replace(Regex("[^a-z0-9_-]"), "-").trim('-').take(32).ifBlank { "repo" }
+
+@Composable
+private fun KopiaDiscoverDialog(api: ApiClient, onPick: (KopiaRepoDef) -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Kopia-Konfigurationen auf dem Server") },
+        text = {
+            Loader(Unit, { api.getJson("/api/kopia/discover") }) { list, _ ->
+                Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (list.arr.isEmpty()) Text("Keine gefunden. Gesucht in /root/.config/kopia, /home/*/.config/kopia und /etc/servercontrol/kopia.")
+                    list.arr.forEach { f ->
+                        val cf = f["configFile"].str
+                        Column {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                StatusDot(if (f["connected"].bool == true) StatusOk else StatusBad)
+                                Spacer(Modifier.width(8.dp))
+                                Text(cf, fontWeight = Bold, fontSize = 13.sp)
+                            }
+                            if (f["connected"].bool == true) Text("${f["storage"].str}: ${f["path"].str}", fontSize = 12.sp)
+                            else Text(f["error"].str.take(200), fontSize = 12.sp, color = StatusBad)
+                            if (f["knownAs"].str.isNotBlank()) Text("bereits eingebunden als „${f["knownAs"].str}“", fontSize = 12.sp, color = StatusOk)
+                            else TextButton(onClick = { onPick(KopiaRepoDef(idFromFile(cf), idFromFile(cf), cf)) }) { Text("Übernehmen") }
+                            HorizontalDivider()
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Schließen") } },
+    )
+}
+
+@Composable
+private fun KopiaConnectDialog(api: ApiClient, onDone: () -> Unit) {
+    var create by remember { mutableStateOf(false) }
+    var id by remember { mutableStateOf("") }
+    var name by remember { mutableStateOf("") }
+    var path by remember { mutableStateOf("/mnt/") }
+    var password by remember { mutableStateOf("") }
+    var store by remember { mutableStateOf(true) }
+    var sources by remember { mutableStateOf("") }
+    val host = rememberActionHost { api }
+    AlertDialog(
+        onDismissRequest = onDone,
+        title = { Text(if (create) "Neues Kopia-Repository" else "Mit Kopia-Repository verbinden") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    FilterChip(!create, { create = false }, label = { Text("Vorhandenes") })
+                    Spacer(Modifier.width(8.dp))
+                    FilterChip(create, { create = true }, label = { Text("Neu anlegen") })
+                }
+                Text(
+                    if (create) "Legt ein neues, verschlüsseltes Repository im angegebenen Verzeichnis an (z. B. auf einer HDD)."
+                    else "Verbindet ein bestehendes Repository (Verzeichnis mit kopia.repository.f). Die Daten bleiben unverändert.",
+                    fontSize = 12.sp,
+                )
+                OutlinedTextField(id, { id = it.lowercase().filter { c -> c.isLetterOrDigit() || c == '-' || c == '_' }.take(32) },
+                    Modifier.fillMaxWidth(), label = { Text("Kennung (z. B. hdd1)") }, singleLine = true)
+                OutlinedTextField(name, { name = it }, Modifier.fillMaxWidth(), label = { Text("Anzeigename") }, singleLine = true)
+                OutlinedTextField(path, { path = it.trim() }, Modifier.fillMaxWidth(), label = { Text("Repository-Verzeichnis auf dem Server") }, singleLine = true)
+                SecretField(password, { password = it }, "Repository-Passwort")
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(store, { store = it }); Text("Passwort auf dem Server hinterlegen (für Aktionen aus der App)", fontSize = 13.sp)
+                }
+                OutlinedTextField(sources, { sources = it }, Modifier.fillMaxWidth(), label = { Text("Snapshot-Quellen, eine pro Zeile (optional)") }, minLines = 2)
+                if (create) Text("Wichtig: Ohne Passwort sind die Daten nicht wiederherstellbar – in KeePass speichern!", color = StatusWarn, fontSize = 12.sp)
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = id.isNotBlank() && path.startsWith("/") && password.length >= 8, onClick = {
+                val body = buildJsonObject {
+                    put("id", id); put("name", name.ifBlank { id }); put("path", path); put("password", password)
+                    put("create", create); put("storePassword", store)
+                    put("sources", buildJsonArray { sources.lines().map { it.trim() }.filter { it.isNotEmpty() }.forEach { add(JsonPrimitive(it)) } })
+                }.toString()
+                host.run(if (create) "Repository angelegt" else "Verbunden", {
+                    val r = api.postRaw("/api/kopia/connect", body)
+                    password = ""
+                    AppJson.parseToJsonElement(r)["output"].str.ifBlank { "OK" }
+                }, after = { if ((host.result as? ActionResult.Message)?.ok == true) onDone() })
+            }) { Text(if (create) "Anlegen" else "Verbinden") }
+        },
+        dismissButton = { TextButton(onClick = onDone) { Text("Abbrechen") } },
+    )
+    ActionResultDialog(host, api)
 }
 
 @Composable
@@ -97,6 +201,14 @@ private fun KopiaRepoEditor(api: ApiClient, initial: KopiaRepoDef, onDone: () ->
                 OutlinedTextField(sources, { sources = it }, label = { Text("Snapshot-Quellen, eine pro Zeile (leer = alle)") }, minLines = 2)
                 Text("Es wird nur die Definition gespeichert – das Repository selbst und seine Daten bleiben unverändert.",
                     style = MaterialTheme.typography.bodySmall)
+                if (!isNew) {
+                    var pw by remember { mutableStateOf("") }
+                    SecretField(pw, { pw = it }, "Repository-Passwort auf dem Server hinterlegen")
+                    TextButton(enabled = pw.isNotEmpty(), onClick = {
+                        val b = buildJsonObject { put("password", pw) }.toString()
+                        host.run("Passwort", { api.postRaw("/api/kopia/repos/${initial.id}/password", b); pw = ""; "Passwort hinterlegt." })
+                    }) { Text("Passwort speichern") }
+                }
                 err?.let { Text(it, color = StatusBad) }
                 if (!isNew) TextButton(onClick = {
                     host.run("Entfernt", { api.deleteRaw("/api/kopia/repos/${initial.id}"); "Definition entfernt." }, after = onDone)

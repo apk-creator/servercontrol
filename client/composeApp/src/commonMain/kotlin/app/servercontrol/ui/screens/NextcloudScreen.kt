@@ -13,6 +13,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -31,14 +32,14 @@ import app.servercontrol.ui.*
 private const val NC = "/api/nextcloud"
 
 @Composable
-fun NextcloudScreen(api: ApiClient) {
+fun NextcloudMain(api: ApiClient, onSetup: () -> Unit) {
     var tab by remember { mutableStateOf(0) }
     val host = rememberActionHost { api }
     var confirm by remember { mutableStateOf<Confirm?>(null) }
     val act = { title: String, action: String, body: String? -> host.post(title, "$NC/action/$action", body) }
     Column(Modifier.fillMaxSize()) {
         ScrollableTabRow(selectedTabIndex = tab, edgePadding = 8.dp) {
-            listOf("Status", "Benutzer", "Apps", "Wartung").forEachIndexed { i, t ->
+            listOf("Status", "Benutzer", "Apps", "Wartung", "Einrichtung").forEachIndexed { i, t ->
                 Tab(selected = tab == i, onClick = { tab = i }, text = { Text(t) })
             }
         }
@@ -46,6 +47,7 @@ fun NextcloudScreen(api: ApiClient) {
             0 -> NcStatus(api, host) { confirm = it }
             1 -> NcUsers(api, host) { confirm = it }
             2 -> NcApps(api, host) { confirm = it }
+            4 -> LaunchedEffect(Unit) { tab = 0; onSetup() }
             3 -> Column(Modifier.verticalScroll(rememberScrollState())) {
                 SectionCard("Datenbank") {
                     ButtonRow {
@@ -251,6 +253,23 @@ private fun NcApps(api: ApiClient, host: ActionHost, ask: (Confirm) -> Unit) {
                     HorizontalDivider()
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun NextcloudScreen(api: ApiClient) {
+    var refresh by remember { mutableStateOf(0) }
+    var setup by remember { mutableStateOf(false) }
+    Loader(refresh, { api.getJson("/api/config") }) { cfg, _ ->
+        val mod = cfg["nextcloud"]
+        if (mod["enabled"].bool != true || setup) {
+            Column(Modifier.fillMaxSize()) {
+                if (setup) TextButton(onClick = { setup = false }) { Text("← Zurück") }
+                NextcloudSetup(api, mod) { setup = false; refresh++ }
+            }
+        } else {
+            NextcloudMain(api) { setup = true }
         }
     }
 }

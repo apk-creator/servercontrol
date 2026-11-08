@@ -10,6 +10,7 @@ import app.servercontrol.data.ServerProfile
 import app.servercontrol.net.ApiClient
 import app.servercontrol.net.ConnectionManager
 import app.servercontrol.net.Route
+import app.servercontrol.terminal.TerminalSession
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -26,14 +27,14 @@ sealed interface Screen {
 }
 
 enum class Section(val title: String, val module: String? = null) {
-    OVERVIEW("Übersicht"), SERVICES("Dienste"), CONTAINERS("Container"), LOGS("Protokolle"),
+    OVERVIEW("Übersicht"), TERMINAL("Terminal"), SERVICES("Dienste"), CONTAINERS("Container"), LOGS("Protokolle"),
     STORAGE("Speicher"), NETWORK("Netzwerk"), PROCESSES("Prozesse"), UPDATES("Updates"),
-    ACCOUNTS("Konten"), KOPIA("Kopia"), NEXTCLOUD("Nextcloud", "nextcloud"), IMMICH("Immich", "immich"),
-    JOBS("Aufgaben"), SHELL("Befehl", "shell"),
+    ACCOUNTS("Konten"), KOPIA("Kopia"), NEXTCLOUD("Nextcloud"), IMMICH("Immich"),
+    JOBS("Aufgaben"), SHELL("Befehl", "shell"), AGENT("Agent & Einstellungen"),
 }
 
 class Session(
-    val profile: ServerProfile,
+    var profile: ServerProfile,
     var api: ApiClient,
     val modules: Map<String, Boolean>,
     val route: Route?,
@@ -56,6 +57,22 @@ class AppState(
     var pendingCert by mutableStateOf<Pair<String, CompletableDeferred<Boolean>>?>(null)
     var paused by mutableStateOf(false)
         private set
+
+    /** SSH terminal – kept while switching sections */
+    var terminal by mutableStateOf<TerminalSession?>(null)
+
+    fun terminalSession(): TerminalSession = terminal ?: TerminalSession(scope).also { terminal = it }
+
+    private fun closeTerminal() {
+        terminal?.close()
+        terminal = null
+    }
+
+    /** Persist a changed profile of the active session (e.g. pinned SSH host key). */
+    fun updateSessionProfile(p: ServerProfile) {
+        session?.profile = p
+        saveProfile(p)
+    }
 
     private val conn = ConnectionManager(vpn)
     private var pauseJob: Job? = null
@@ -118,6 +135,7 @@ class AppState(
 
     private suspend fun expire() {
         val s = session ?: return
+        closeTerminal()
         session = null
         conn.close(s.profile)
         error = "Sitzung abgelaufen – bitte erneut anmelden."
@@ -126,6 +144,7 @@ class AppState(
 
     fun logout() = scope.launch {
         val s = session ?: return@launch
+        closeTerminal()
         runCatching { s.api.postRaw("/api/logout") }
         session = null
         conn.close(s.profile)
@@ -142,6 +161,7 @@ class AppState(
             delay(graceMs)
             val s = session ?: return@launch
             savedToken = s.api.token
+            closeTerminal()
             paused = true
             conn.close(s.profile) // switches the tunnel off if we started it
         }
@@ -175,6 +195,7 @@ class AppState(
 
     /** App is closing: log out and switch the tunnel off. */
     suspend fun shutdown() {
+        closeTerminal()
         val s = session ?: return
         runCatching { s.api.postRaw("/api/logout") }
         conn.close(s.profile)

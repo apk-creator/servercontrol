@@ -30,15 +30,21 @@ kotlin {
             implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.1")
             implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
         }
+        // SSH (pure Java) – used by the actual implementations in androidMain and desktopMain
+        val jsch = "com.github.mwiede:jsch:0.2.26"
         androidMain.dependencies {
             implementation("androidx.activity:activity-compose:1.10.1")
             implementation("androidx.lifecycle:lifecycle-process:2.8.7")
             implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+            implementation(jsch)
+            // ed25519 / curve25519 for SSH on older Android versions
+            implementation("org.bouncycastle:bcprov-jdk18on:1.80")
         }
         val desktopMain by getting {
             dependencies {
                 implementation(compose.desktop.currentOs)
                 implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.10.2")
+                implementation(jsch)
             }
         }
     }
@@ -93,7 +99,7 @@ compose.desktop {
             packageVersion = appVersion
             description = "ServerControl – Debian-Server-Verwaltung"
             vendor = "apk-creator"
-            modules("java.naming", "jdk.crypto.ec")
+            modules("java.naming", "jdk.crypto.ec", "java.logging", "java.security.jgss")
             windows {
                 menu = true
                 shortcut = true

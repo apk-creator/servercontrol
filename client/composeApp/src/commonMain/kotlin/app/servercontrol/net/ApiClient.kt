@@ -76,6 +76,13 @@ class ApiClient(
     suspend fun putRaw(path: String, body: String): String = raw(HttpMethod.Put, path, body)
     suspend fun deleteRaw(path: String): String = raw(HttpMethod.Delete, path)
 
+    /** Uploads raw bytes (e.g. a new agent binary). */
+    suspend fun postBytes(path: String, data: ByteArray, timeoutMs: Long = 300_000): String =
+        raw(HttpMethod.Post, path, timeoutMs = timeoutMs) {
+            contentType(ContentType.Application.OctetStream)
+            setBody(data)
+        }
+
     suspend fun ping(timeoutMs: Long): Boolean = runCatching {
         raw(HttpMethod.Get, "/api/ping", timeoutMs = timeoutMs).contains("servercontrol-agent")
     }.getOrDefault(false)

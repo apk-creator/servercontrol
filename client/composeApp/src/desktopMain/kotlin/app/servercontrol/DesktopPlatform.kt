@@ -220,3 +220,18 @@ actual fun CredentialFields(
     }
     LaunchedEffect(Unit) { runCatching { first.requestFocus() } }
 }
+
+@Composable
+actual fun SecretField(value: String, onValue: (String) -> Unit, label: String) {
+    OutlinedTextField(value, onValue, Modifier.fillMaxWidth(), label = { Text(label) }, singleLine = true,
+        visualTransformation = PasswordVisualTransformation())
+}
+
+actual suspend fun pickFile(): ByteArray? {
+    val path = withContext(Dispatchers.Main) {
+        val d = java.awt.FileDialog(null as java.awt.Frame?, "Datei wählen", java.awt.FileDialog.LOAD)
+        d.isVisible = true
+        if (d.file == null) null else File(d.directory, d.file)
+    } ?: return null
+    return withContext(Dispatchers.IO) { path.readBytes() }
+}
