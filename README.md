@@ -7,6 +7,9 @@ Verwaltung **eines** Debian-13-Servers vom Android-Gerät und vom Desktop (Linux
 - **Nextcloud** – Status, Wartungsmodus, Einrichtungsprüfung, Benutzer (anlegen, sperren, Kontingent, Passwort), Apps, DB-Reparaturen, Dateiscan, Hintergrundjob-Modus
 - **Immich** – Version/Speicher/Statistik, Aufträge (starten, pausieren, leeren), Benutzer, externe Bibliotheken
 - **WireGuard automatisch**: nur während die App benutzt wird und nur außerhalb des Heimnetzes
+- **SSH-Terminal** (xterm-kompatibel: bash, nano, htop, less, vim, mc), Hostschlüssel gepinnt, Anmeldung per Passwort (KeePass) oder privatem Schlüssel
+- **Einrichtung aus der App**: Nextcloud (occ), Immich (URL + API-Schlüssel), Kopia (vorhandene Konfigurationen finden, Repositories verbinden oder neu anlegen)
+- **Agent-Update aus der App**: neuestes GitHub-Release oder hochgeladene Datei
 
 ```
  App (Android / Desktop)  ──HTTPS, Zertifikat gepinnt──▶  servercontrol-agent (Go, root, systemd)
@@ -38,7 +41,13 @@ Danach `/etc/servercontrol/agent.json` anpassen (Vorlage: `deploy/agent.example.
 
 Weitere Befehle: `servercontrol-agent -passwd` (Passwort ändern), `-fingerprint` (Fingerprint anzeigen).
 
-Kopia-Repositories lassen sich auch direkt in der App hinzufügen/bearbeiten (speichert nur die Definition im Agent).
+Nextcloud, Immich und Kopia lassen sich komplett in der App einrichten (Bereiche *Nextcloud*, *Immich*, *Kopia*) – die Konfigurationsdatei musst du dafür nicht anfassen. Geheimnisse (Immich-API-Schlüssel, Kopia-Passwörter, GitHub-Token) landen nur auf dem Server in `/etc/servercontrol/` (chmod 600).
+
+### Agent aktualisieren
+
+*Agent & Einstellungen → Nach Updates suchen → Jetzt installieren.* Der Agent lädt `servercontrol-agent.tar.gz` aus dem neuesten Release, prüft die neue Datei, ersetzt sich selbst (alte Version bleibt als `.bak`) und startet neu. Für dieses private Repository braucht der Server dafür ein GitHub-Token: *github.com → Settings → Developer settings → Fine-grained tokens*, nur Repository `servercontrol`, Berechtigung **Contents: Read-only**. Alternativ *Datei hochladen …* mit dem Archiv aus dem Release.
+
+Die allererste Umstellung von 1.0.0 auf eine Version mit Update-Funktion geht noch manuell: neues Archiv entpacken und `sudo sh install.sh servercontrol-agent-linux-amd64` erneut ausführen (die Konfiguration bleibt erhalten).
 
 ## 2. App installieren
 
@@ -62,7 +71,11 @@ Beim Verbinden prüft die App, ob der Agent im Heimnetz erreichbar ist. Wenn nic
 - **Linux**: Tunnel in NetworkManager importieren: `nmcli connection import type wireguard file wg-home.conf` und `nmcli connection modify wg-home connection.autoconnect no`. Tunnelname = Verbindungsname.
 - **Windows**: Standard ist `wireguard.exe /installtunnelservice …` – das braucht Administratorrechte. Alternativ eigene Befehle im Profil eintragen (`{tunnel}` wird ersetzt).
 
-## 4. KeePass
+## 4. SSH-Terminal
+
+Bereich *Terminal*: Host ist die Adresse des Agenten (Heimnetz oder WireGuard), Port und Benutzer werden im Profil gemerkt, das Passwort nie. Beim ersten Verbinden den Hostschlüssel mit `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` vergleichen. Optional privaten Schlüssel einfügen (wird verschlüsselt im Profil gespeichert, das Passwortfeld dient dann als Passphrase). Unter der Ausgabe gibt es eine Leiste mit Strg, Alt, Esc, Tab, Pfeiltasten usw.; Schriftgröße, Einfügen und Kopieren oben rechts.
+
+## 5. KeePass
 
 Die App speichert **keine Passwörter**.
 

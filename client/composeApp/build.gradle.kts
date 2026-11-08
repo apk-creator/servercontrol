@@ -8,7 +8,7 @@ plugins {
     id("com.android.application")
 }
 
-val appVersion = "1.0.0"
+val appVersion = "1.1.0"
 val ktor = "3.1.3"
 
 kotlin {
