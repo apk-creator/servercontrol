@@ -27,7 +27,7 @@ kotlin {
             implementation("io.ktor:ktor-client-okhttp:$ktor")
             implementation("io.ktor:ktor-client-content-negotiation:$ktor")
             implementation("io.ktor:ktor-serialization-kotlinx-json:$ktor")
-            implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.1")
+            implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
             implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
         }
         // SSH (pure Java) – used by the actual implementations in androidMain and desktopMain
@@ -36,6 +36,8 @@ kotlin {
             implementation("androidx.activity:activity-compose:1.10.1")
             implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
             implementation(jsch)
+            // ConnectBot's terminal (libvterm, selection with magnifier, IME handling)
+            implementation("org.connectbot:termlib:0.3.14")
             // ed25519 / curve25519 for SSH on older Android versions
             implementation("org.bouncycastle:bcprov-jdk18on:1.80")
         }
@@ -51,7 +53,7 @@ kotlin {
 
 android {
     namespace = "app.servercontrol"
-    compileSdk = 35
+    compileSdk = 36
     defaultConfig {
         applicationId = "app.servercontrol"
         minSdk = 26
