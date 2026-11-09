@@ -18,6 +18,8 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -31,6 +33,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import app.servercontrol.AppState
 import app.servercontrol.CredentialFields
@@ -152,9 +156,17 @@ private fun SshConnectForm(state: AppState, session: Session) {
                 Text("Mit privatem Schlüssel anmelden")
             }
             if (useKey) {
+                var showKey by remember { mutableStateOf(false) }
                 OutlinedTextField(
                     key, { key = it }, Modifier.fillMaxWidth(), label = { Text("Privater Schlüssel (OpenSSH/PEM)") },
-                    minLines = 3, maxLines = 6, textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                    minLines = if (showKey) 3 else 1, maxLines = if (showKey) 6 else 1,
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                    visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
+                    trailingIcon = {
+                        IconButton(onClick = { showKey = !showKey }) {
+                            Icon(if (showKey) Icons.Default.VisibilityOff else Icons.Default.Visibility, if (showKey) "Verbergen" else "Anzeigen")
+                        }
+                    },
                     supportingText = { Text("Wird verschlüsselt im Profil gespeichert. Das Feld „Passwort“ dient dann als Passphrase.") },
                 )
             }

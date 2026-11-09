@@ -6,13 +6,26 @@ import android.content.pm.PackageManager
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.text.InputType
+import android.text.method.HideReturnsTransformationMethod
+import android.text.method.PasswordTransformationMethod
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
 import android.widget.LinearLayout
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import io.ktor.client.HttpClient
@@ -148,41 +161,73 @@ actual fun CredentialFields(
     val onU = rememberUpdatedState(onUsername)
     val onP = rememberUpdatedState(onPassword)
     val submit = rememberUpdatedState(onSubmit)
-    AndroidView(
-        modifier = Modifier.fillMaxWidth(),
-        factory = { ctx ->
-            fun field(hint: String, autofill: String, type: Int) = EditText(ctx).apply {
-                this.hint = hint
-                inputType = type
-                setSingleLine(true)
-                setAutofillHints(autofill)
-                importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_YES
-            }
-            val user = field("Benutzername", View.AUTOFILL_HINT_USERNAME, InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI)
-            val pass = field("Passwort", View.AUTOFILL_HINT_PASSWORD, InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD)
-            user.imeOptions = EditorInfo.IME_ACTION_NEXT
-            pass.imeOptions = EditorInfo.IME_ACTION_DONE
-            user.addTextChangedListener(SimpleWatcher { onU.value(it) })
-            pass.addTextChangedListener(SimpleWatcher { onP.value(it) })
-            pass.setOnEditorActionListener { _, id, _ ->
-                if (id == EditorInfo.IME_ACTION_DONE) { submit.value(); true } else false
-            }
-            LinearLayout(ctx).apply {
-                orientation = LinearLayout.VERTICAL
-                importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_AUTO
-                addView(user, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-                addView(pass, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-                tag = user to pass
-            }
-        },
-        update = { layout ->
-            val pair = layout.tag as Pair<*, *>
-            val user = pair.first as EditText
-            val pass = pair.second as EditText
-            if (user.text.toString() != username) user.setText(username)
-            if (pass.text.toString() != password) pass.setText(password)
-        },
-    )
+    var visible by remember { mutableStateOf(false) }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
+        AndroidView(
+            modifier = Modifier.weight(1f),
+            factory = { ctx ->
+                val user = EditText(ctx).apply {
+                    hint = "Benutzername"
+                    setSingleLine(true)
+                    inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+                    setAutofillHints(View.AUTOFILL_HINT_USERNAME)
+                    importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_YES
+                    imeOptions = EditorInfo.IME_ACTION_NEXT
+                }
+                val pass = passwordEditText(ctx, "Passwort").apply { imeOptions = EditorInfo.IME_ACTION_DONE }
+                user.addTextChangedListener(SimpleWatcher { onU.value(it) })
+                pass.addTextChangedListener(SimpleWatcher { onP.value(it) })
+                pass.setOnEditorActionListener { _, id, _ ->
+                    if (id == EditorInfo.IME_ACTION_DONE) { submit.value(); true } else false
+                }
+                LinearLayout(ctx).apply {
+                    orientation = LinearLayout.VERTICAL
+                    importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_AUTO
+                    addView(user, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+                    addView(pass, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+                    tag = user to pass
+                }
+            },
+            update = { layout ->
+                val pair = layout.tag as Pair<*, *>
+                val user = pair.first as EditText
+                val pass = pair.second as EditText
+                if (user.text.toString() != username) user.setText(username)
+                if (pass.text.toString() != password) pass.setText(password)
+                setMasked(pass, !visible)
+            },
+        )
+        EyeButton(visible) { visible = !visible }
+    }
+}
+
+/** EditText for secrets. Masking must be applied AFTER setSingleLine (which resets the transformation). */
+private fun passwordEditText(ctx: Context, label: String) = EditText(ctx).apply {
+    hint = label
+    setSingleLine(true)
+    inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+    transformationMethod = PasswordTransformationMethod.getInstance()
+    setAutofillHints(View.AUTOFILL_HINT_PASSWORD)
+    importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_YES
+}
+
+private fun setMasked(et: EditText, masked: Boolean) {
+    val want = if (masked) PasswordTransformationMethod.getInstance() else HideReturnsTransformationMethod.getInstance()
+    if (et.transformationMethod !== want) {
+        val sel = et.selectionEnd
+        et.transformationMethod = want
+        et.setSelection(sel.coerceIn(0, et.text.length))
+    }
+}
+
+@Composable
+private fun EyeButton(visible: Boolean, toggle: () -> Unit) {
+    IconButton(onClick = toggle) {
+        Icon(
+            if (visible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+            if (visible) "Passwort verbergen" else "Passwort anzeigen",
+        )
+    }
 }
 
 private class SimpleWatcher(val cb: (String) -> Unit) : android.text.TextWatcher {
@@ -194,20 +239,18 @@ private class SimpleWatcher(val cb: (String) -> Unit) : android.text.TextWatcher
 @Composable
 actual fun SecretField(value: String, onValue: (String) -> Unit, label: String) {
     val cb = rememberUpdatedState(onValue)
-    AndroidView(
-        modifier = Modifier.fillMaxWidth(),
-        factory = { ctx ->
-            EditText(ctx).apply {
-                hint = label
-                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-                setSingleLine(true)
-                setAutofillHints(View.AUTOFILL_HINT_PASSWORD)
-                importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_YES
-                addTextChangedListener(SimpleWatcher { cb.value(it) })
-            }
-        },
-        update = { et -> if (et.text.toString() != value) et.setText(value) },
-    )
+    var visible by remember { mutableStateOf(false) }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
+        AndroidView(
+            modifier = Modifier.weight(1f),
+            factory = { ctx -> passwordEditText(ctx, label).apply { addTextChangedListener(SimpleWatcher { cb.value(it) }) } },
+            update = { et ->
+                if (et.text.toString() != value) et.setText(value)
+                setMasked(et, !visible)
+            },
+        )
+        EyeButton(visible) { visible = !visible }
+    }
 }
 
 /** Bridge to the activity's file picker (registered in MainActivity). */

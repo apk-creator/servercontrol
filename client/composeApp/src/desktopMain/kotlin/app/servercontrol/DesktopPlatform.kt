@@ -3,11 +3,19 @@ package app.servercontrol
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
@@ -19,6 +27,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
@@ -215,16 +224,34 @@ actual fun CredentialFields(
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedTextField(username, onUsername, Modifier.fillMaxWidth().focusRequester(first).then(keys),
             label = { Text("Benutzername") }, singleLine = true)
-        OutlinedTextField(password, onPassword, Modifier.fillMaxWidth().then(keys),
-            label = { Text("Passwort") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
+        PasswordInput(password, onPassword, "Passwort", Modifier.fillMaxWidth().then(keys))
     }
     LaunchedEffect(Unit) { runCatching { first.requestFocus() } }
 }
 
 @Composable
 actual fun SecretField(value: String, onValue: (String) -> Unit, label: String) {
-    OutlinedTextField(value, onValue, Modifier.fillMaxWidth(), label = { Text(label) }, singleLine = true,
-        visualTransformation = PasswordVisualTransformation())
+    PasswordInput(value, onValue, label, Modifier.fillMaxWidth())
+}
+
+/** Masked text field with an eye button to reveal the input. */
+@Composable
+fun PasswordInput(value: String, onValue: (String) -> Unit, label: String, modifier: Modifier = Modifier) {
+    var visible by remember { mutableStateOf(false) }
+    OutlinedTextField(
+        value, onValue, modifier,
+        label = { Text(label) },
+        singleLine = true,
+        visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
+        trailingIcon = {
+            IconButton(onClick = { visible = !visible }) {
+                Icon(
+                    if (visible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                    if (visible) "Passwort verbergen" else "Passwort anzeigen",
+                )
+            }
+        },
+    )
 }
 
 actual suspend fun pickFile(): ByteArray? {
