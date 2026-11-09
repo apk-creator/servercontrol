@@ -8,9 +8,17 @@ import app.servercontrol.SshShell
 import app.servercontrol.openSsh
 import app.servercontrol.terminalKeepAlive
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
+
+/** One SSH terminal: emulator + shell + ordered writer. Lives in AppState so it survives section switches. */
+/** Everything that goes to the SSH server runs through one writer coroutine on an IO thread. */
+private sealed interface Outgoing {
+    class Data(val bytes: ByteArray) : Outgoing
+    class Resize(val cols: Int, val rows: Int) : Outgoing
+}
 
 /** One SSH terminal: emulator + shell + ordered writer. Lives in AppState so it survives section switches. */
 class TerminalSession(private val scope: CoroutineScope) {
@@ -23,7 +31,7 @@ class TerminalSession(private val scope: CoroutineScope) {
     private var shell: SshShell? = null
     private var readJob: Job? = null
     private var writeJob: Job? = null
-    private var outbox = Channel<ByteArray>(Channel.UNLIMITED)
+    private var outbox = Channel<Outgoing>(Channel.UNLIMITED)
 
     init {
         emu.onResponse = { send(it) }
@@ -39,29 +47,40 @@ class TerminalSession(private val scope: CoroutineScope) {
         terminalKeepAlive(true, title)
         outbox = Channel(Channel.UNLIMITED)
         val box = outbox
-        writeJob = scope.launch {
-            for (data in box) runCatching { sh.write(data) }
+        // Network I/O must never happen on the UI thread (Android aborts it, which corrupts the SSH stream).
+        writeJob = scope.launch(Dispatchers.IO) {
+            for (msg in box) runCatching {
+                when (msg) {
+                    is Outgoing.Data -> sh.write(msg.bytes)
+                    is Outgoing.Resize -> sh.resize(msg.cols, msg.rows)
+                }
+            }
         }
         readJob = scope.launch {
             val buf = ByteArray(16 * 1024)
-            while (true) {
-                val n = sh.read(buf)
-                if (n < 0) break
-                if (n > 0) {
-                    emu.feed(buf, n)
-                    if (emu.title.isNotBlank()) title = emu.title
+            try {
+                while (true) {
+                    val n = sh.read(buf)
+                    if (n < 0) break
+                    if (n > 0) {
+                        emu.feed(buf, n)
+                        if (emu.title.isNotBlank()) title = emu.title
+                    }
+                }
+            } finally {
+                if (shell === sh) {
+                    connected = false
+                    terminalKeepAlive(false, "")
+                    runCatching { emu.feed("\r\n\u001b[33m[Verbindung beendet]\u001b[0m\r\n".encodeToByteArray()) }
                 }
             }
-            connected = false
-            terminalKeepAlive(false, "")
-            emu.feed("\r\n\u001b[33m[Verbindung beendet]\u001b[0m\r\n".encodeToByteArray())
         }
     }
 
     fun send(text: String) = send(text.encodeToByteArray())
 
     fun send(data: ByteArray) {
-        if (connected) outbox.trySend(data)
+        if (connected) outbox.trySend(Outgoing.Data(data))
     }
 
     /**
@@ -78,16 +97,17 @@ class TerminalSession(private val scope: CoroutineScope) {
     fun resize(cols: Int, rows: Int) {
         if (cols == emu.cols && rows == emu.rows) return
         emu.resize(cols, rows)
-        shell?.resize(cols, rows)
+        if (connected) outbox.trySend(Outgoing.Resize(cols, rows))
     }
 
     fun close() {
+        val sh = shell
+        shell = null
         readJob?.cancel()
         writeJob?.cancel()
         outbox.close()
-        shell?.close()
-        shell = null
         if (connected) terminalKeepAlive(false, "")
         connected = false
+        if (sh != null) scope.launch(Dispatchers.IO) { runCatching { sh.close() } }
     }
 }
