@@ -66,3 +66,10 @@ expect suspend fun pickFile(): ByteArray?
  * Android: foreground service with a "Verbunden" notification; desktop: nothing to do.
  */
 expect fun terminalKeepAlive(active: Boolean, title: String)
+
+/** Dispatcher for blocking I/O (network, files). */
+expect val ioDispatcher: kotlinx.coroutines.CoroutineDispatcher
+
+/** Text of the last crash (Android), shown once on the next start. */
+expect fun readCrashReport(): String?
+expect fun clearCrashReport()

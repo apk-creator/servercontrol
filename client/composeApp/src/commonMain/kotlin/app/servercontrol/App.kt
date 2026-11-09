@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -103,6 +104,7 @@ fun App(state: AppState) {
                 is Screen.Login -> LoginScreen(state, s.profile)
                 Screen.Main -> MainScreen(state)
             }
+            CrashReportDialog()
             state.pendingCert?.let { (fp, d) ->
                 AlertDialog(
                     onDismissRequest = { d.complete(false) },
@@ -356,3 +358,29 @@ fun ButtonRow(content: @Composable () -> Unit) {
 }
 
 val Bold = FontWeight.SemiBold
+
+/** Shows the report of the last crash once, so it can be copied and sent. */
+@Composable
+fun CrashReportDialog() {
+    var report by remember { mutableStateOf(readCrashReport()) }
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    val r = report ?: return
+    AlertDialog(
+        onDismissRequest = { clearCrashReport(); report = null },
+        title = { Text("Die App ist zuletzt abgestürzt") },
+        text = {
+            Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                Text("Bitte kopieren und an den Entwickler schicken:", style = MaterialTheme.typography.bodySmall)
+                Spacer(Modifier.height(8.dp))
+                Text(r, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                clipboard.setText(androidx.compose.ui.text.AnnotatedString(r))
+                clearCrashReport(); report = null
+            }) { Text("Kopieren") }
+        },
+        dismissButton = { TextButton(onClick = { clearCrashReport(); report = null }) { Text("Schließen") } },
+    )
+}

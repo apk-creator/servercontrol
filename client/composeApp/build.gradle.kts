@@ -21,7 +21,7 @@ kotlin {
             implementation(compose.runtime)
             implementation(compose.foundation)
             implementation(compose.material3)
-            implementation(compose.materialIconsExtended)
+            implementation("org.jetbrains.compose.material:material-icons-extended:1.7.3")
             implementation(compose.ui)
             implementation("io.ktor:ktor-client-core:$ktor")
             implementation("io.ktor:ktor-client-okhttp:$ktor")
@@ -53,7 +53,7 @@ kotlin {
 
 android {
     namespace = "app.servercontrol"
-    compileSdk = 36
+    compileSdk = 37
     defaultConfig {
         applicationId = "app.servercontrol"
         minSdk = 26

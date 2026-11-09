@@ -239,3 +239,5 @@ actual suspend fun pickFile(): ByteArray? {
         FilePicker.context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
     }
 }
+
+actual val ioDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.IO

@@ -202,3 +202,8 @@ actual suspend fun pickFile(): ByteArray? {
 
 /** Desktop: the session stays connected as long as the window is open. */
 actual fun terminalKeepAlive(active: Boolean, title: String) {}
+
+actual val ioDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.IO
+
+actual fun readCrashReport(): String? = null
+actual fun clearCrashReport() {}

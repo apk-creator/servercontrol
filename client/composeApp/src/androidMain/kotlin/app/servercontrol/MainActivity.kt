@@ -6,6 +6,7 @@ import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.plus
 
 class ServerControlApp : Application() {
     lateinit var state: AppState
@@ -14,8 +15,11 @@ class ServerControlApp : Application() {
     override fun onCreate() {
         super.onCreate()
         AppContext.app = applicationContext
+        CrashLog.install(this)
         // Survives activity recreation; the session lives as long as the process.
-        state = AppState(AndroidSecureStore(this), MainScope())
+        // Errors in background coroutines are recorded instead of killing the app.
+        val handler = kotlinx.coroutines.CoroutineExceptionHandler { _, e -> CrashLog.record("Fehler in Hintergrundaufgabe", e) }
+        state = AppState(AndroidSecureStore(this), MainScope() + handler)
     }
 }
 

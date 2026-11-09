@@ -30,6 +30,10 @@ object AppContext {
  */
 class TerminalService : Service() {
     companion object {
+        /** running instance (main thread only) */
+        var instance: TerminalService? = null
+        /** stop requested before the service reached startForeground() */
+        var pendingStop = false
         const val CHANNEL = "terminal"
         const val NOTIFICATION_ID = 42
         const val ACTION_STOP = "app.servercontrol.STOP_TERMINAL"
@@ -41,18 +45,28 @@ class TerminalService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        instance = this
+        // Always enter the foreground state first: a service started with startForegroundService()
+        // that stops without calling startForeground() crashes the app (ConnectBot does the same).
+        val title = intent?.getStringExtra(EXTRA_TITLE) ?: "SSH"
+        val n = buildNotification(title)
+        runCatching {
+            if (Build.VERSION.SDK_INT >= 34) {
+                startForeground(NOTIFICATION_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            } else {
+                startForeground(NOTIFICATION_ID, n)
+            }
+        }
         if (intent?.action == ACTION_STOP) {
             // "Trennen" in the notification
             (application as ServerControlApp).state.terminal?.close()
-            stopSelf()
+            shutdown()
             return START_NOT_STICKY
         }
-        val title = intent?.getStringExtra(EXTRA_TITLE) ?: "SSH"
-        val n = buildNotification(title)
-        if (Build.VERSION.SDK_INT >= 34) {
-            startForeground(NOTIFICATION_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
-        } else {
-            startForeground(NOTIFICATION_ID, n)
+        if (pendingStop) {
+            pendingStop = false
+            shutdown()
+            return START_NOT_STICKY
         }
         if (wakeLock == null) {
             wakeLock = (getSystemService(Context.POWER_SERVICE) as PowerManager)
@@ -61,7 +75,13 @@ class TerminalService : Service() {
         return START_NOT_STICKY
     }
 
+    fun shutdown() {
+        runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
+        stopSelf()
+    }
+
     override fun onDestroy() {
+        if (instance === this) instance = null
         wakeLock?.let { if (it.isHeld) it.release() }
         wakeLock = null
         super.onDestroy()
@@ -122,11 +142,12 @@ class TerminalService : Service() {
 
 actual fun terminalKeepAlive(active: Boolean, title: String) {
     val ctx = AppContext.app
-    val i = Intent(ctx, TerminalService::class.java)
     if (active) {
-        i.putExtra(TerminalService.EXTRA_TITLE, title)
-        runCatching { ctx.startForegroundService(i) }
+        TerminalService.pendingStop = false
+        val i = Intent(ctx, TerminalService::class.java).putExtra(TerminalService.EXTRA_TITLE, title)
+        runCatching { ctx.startForegroundService(i) }.onFailure { CrashLog.record("Hintergrunddienst konnte nicht starten", it) }
     } else {
-        ctx.stopService(i)
+        val svc = TerminalService.instance
+        if (svc != null) svc.shutdown() else TerminalService.pendingStop = true
     }
 }

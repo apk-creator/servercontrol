@@ -44,7 +44,8 @@ import app.servercontrol.SshHostKeyUnknown
 import app.servercontrol.isDesktop
 import app.servercontrol.terminal.TerminalInputState
 import app.servercontrol.terminal.TerminalKeyBar
-import app.servercontrol.terminal.TerminalView
+import app.servercontrol.terminal.TerminalPane
+import app.servercontrol.terminal.terminalHasOwnSelection
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.launch
 
@@ -73,13 +74,19 @@ private fun TerminalRunning(state: AppState) {
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(term.title, Modifier.weight(1f).padding(start = 8.dp), style = MaterialTheme.typography.bodySmall, maxLines = 1)
-            IconButton(onClick = { font = (font - 1f).coerceAtLeast(7f) }) { Icon(Icons.Default.Remove, "Schrift kleiner") }
-            IconButton(onClick = { font = (font + 1f).coerceAtMost(28f) }) { Icon(Icons.Default.Add, "Schrift größer") }
+            if (!terminalHasOwnSelection) {
+                IconButton(onClick = { font = (font - 1f).coerceAtLeast(7f) }) { Icon(Icons.Default.Remove, "Schrift kleiner") }
+                IconButton(onClick = { font = (font + 1f).coerceAtMost(28f) }) { Icon(Icons.Default.Add, "Schrift größer") }
+            }
             IconButton(onClick = { clipboard.getText()?.text?.let { term.paste(it) } }) { Icon(Icons.Default.ContentPaste, "Einfügen") }
-            IconButton(onClick = { clipboard.setText(AnnotatedString(term.emu.screenText())) }) { Icon(Icons.Default.ContentCopy, "Bildschirm kopieren") }
+            if (!terminalHasOwnSelection) {
+                IconButton(onClick = { clipboard.setText(AnnotatedString(term.backend.screenText() ?: "")) }) {
+                    Icon(Icons.Default.ContentCopy, "Bildschirm kopieren")
+                }
+            }
             IconButton(onClick = { term.close() }) { Icon(Icons.Default.LinkOff, "Trennen") }
         }
-        TerminalView(term, font, mods, Modifier.weight(1f).fillMaxWidth())
+        TerminalPane(term, mods, font, Modifier.weight(1f).fillMaxWidth())
         TerminalKeyBar(term, mods)
     }
 }
