@@ -11,7 +11,9 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -35,6 +37,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -44,9 +47,50 @@ import app.servercontrol.ui.screens.*
 import kotlinx.coroutines.launch
 import kotlin.random.Random
 
+// Monochrome design: black / grey / white. Only status indicators keep colour.
+private val MonoLight = lightColorScheme(
+    primary = Color(0xFF111111), onPrimary = Color.White,
+    primaryContainer = Color(0xFFE0E0E0), onPrimaryContainer = Color(0xFF111111),
+    inversePrimary = Color(0xFFDADADA),
+    secondary = Color(0xFF424242), onSecondary = Color.White,
+    secondaryContainer = Color(0xFFE6E6E6), onSecondaryContainer = Color(0xFF111111),
+    tertiary = Color(0xFF616161), onTertiary = Color.White,
+    tertiaryContainer = Color(0xFFEDEDED), onTertiaryContainer = Color(0xFF111111),
+    background = Color.White, onBackground = Color(0xFF111111),
+    surface = Color.White, onSurface = Color(0xFF111111),
+    surfaceVariant = Color(0xFFEEEEEE), onSurfaceVariant = Color(0xFF424242),
+    surfaceTint = Color(0xFF111111),
+    inverseSurface = Color(0xFF212121), inverseOnSurface = Color(0xFFF5F5F5),
+    outline = Color(0xFF8E8E8E), outlineVariant = Color(0xFFD6D6D6),
+    surfaceBright = Color.White, surfaceDim = Color(0xFFE0E0E0),
+    surfaceContainerLowest = Color.White, surfaceContainerLow = Color(0xFFF7F7F7),
+    surfaceContainer = Color(0xFFF2F2F2), surfaceContainerHigh = Color(0xFFECECEC),
+    surfaceContainerHighest = Color(0xFFE6E6E6),
+)
+
+private val MonoDark = darkColorScheme(
+    primary = Color(0xFFEDEDED), onPrimary = Color(0xFF111111),
+    primaryContainer = Color(0xFF3A3A3A), onPrimaryContainer = Color.White,
+    inversePrimary = Color(0xFF212121),
+    secondary = Color(0xFFBDBDBD), onSecondary = Color(0xFF111111),
+    secondaryContainer = Color(0xFF2E2E2E), onSecondaryContainer = Color(0xFFEDEDED),
+    tertiary = Color(0xFF9E9E9E), onTertiary = Color(0xFF111111),
+    tertiaryContainer = Color(0xFF333333), onTertiaryContainer = Color(0xFFEDEDED),
+    background = Color(0xFF0E0E0E), onBackground = Color(0xFFEDEDED),
+    surface = Color(0xFF0E0E0E), onSurface = Color(0xFFEDEDED),
+    surfaceVariant = Color(0xFF2A2A2A), onSurfaceVariant = Color(0xFFBDBDBD),
+    surfaceTint = Color(0xFFEDEDED),
+    inverseSurface = Color(0xFFEDEDED), inverseOnSurface = Color(0xFF111111),
+    outline = Color(0xFF7A7A7A), outlineVariant = Color(0xFF3A3A3A),
+    surfaceBright = Color(0xFF2C2C2C), surfaceDim = Color(0xFF0E0E0E),
+    surfaceContainerLowest = Color(0xFF080808), surfaceContainerLow = Color(0xFF151515),
+    surfaceContainer = Color(0xFF1B1B1B), surfaceContainerHigh = Color(0xFF232323),
+    surfaceContainerHighest = Color(0xFF2B2B2B),
+)
+
 @Composable
 fun AppTheme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme(), content = content)
+    MaterialTheme(colorScheme = if (isSystemInDarkTheme()) MonoDark else MonoLight, content = content)
 }
 
 @Composable
@@ -156,7 +200,7 @@ fun ProfileEditor(state: AppState, initial: ServerProfile, onDone: () -> Unit) {
 
 // ======================= Login =======================
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun LoginScreen(state: AppState, profile: ServerProfile) {
     var user by remember { mutableStateOf("") }
@@ -174,8 +218,8 @@ fun LoginScreen(state: AppState, profile: ServerProfile) {
             navigationIcon = { IconButton(onClick = { state.screen = Screen.Profiles }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Zurück") } },
         )
     }) { pad ->
-        Box(Modifier.padding(pad).fillMaxSize(), contentAlignment = Alignment.TopCenter) {
-            Column(Modifier.widthIn(max = 420.dp).padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Box(Modifier.padding(pad).consumeWindowInsets(pad).imePadding().fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+            Column(Modifier.widthIn(max = 420.dp).padding(24.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Anmelden bei ${profile.name}", style = MaterialTheme.typography.titleLarge)
                 CredentialFields(user, { user = it }, pw, { pw = it }, onSubmit = submit)
                 Button(onClick = submit, enabled = state.busy == null, modifier = Modifier.fillMaxWidth()) { Text("Verbinden") }
@@ -210,7 +254,7 @@ fun Section.icon(): ImageVector = when (this) {
     Section.SHELL -> Icons.Default.Code
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun MainScreen(state: AppState) {
     val session = state.session ?: return
@@ -253,7 +297,8 @@ fun MainScreen(state: AppState) {
                     },
                 )
             }) { pad ->
-                Box(Modifier.padding(pad).fillMaxSize()) {
+                // keyboard pushes the content up (Android 15 draws edge-to-edge)
+                Box(Modifier.padding(pad).consumeWindowInsets(pad).imePadding().fillMaxSize()) {
                     if (state.busy != null) {
                         Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                             CircularProgressIndicator()

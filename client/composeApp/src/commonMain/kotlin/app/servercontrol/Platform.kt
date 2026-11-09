@@ -60,3 +60,9 @@ expect fun SecretField(value: String, onValue: (String) -> Unit, label: String)
 
 /** Lets the user pick a file; returns its content or null. */
 expect suspend fun pickFile(): ByteArray?
+
+/**
+ * Keeps an SSH session alive while the app is in the background.
+ * Android: foreground service with a "Verbunden" notification; desktop: nothing to do.
+ */
+expect fun terminalKeepAlive(active: Boolean, title: String)

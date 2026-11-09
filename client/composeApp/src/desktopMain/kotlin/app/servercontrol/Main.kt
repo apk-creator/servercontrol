@@ -58,6 +58,7 @@ fun main() = application {
         },
         title = title,
         state = windowState,
+        icon = @Suppress("DEPRECATION") androidx.compose.ui.res.painterResource("icon.png"),
     ) {
         if (s == null) {
             UnlockScreen { pass ->

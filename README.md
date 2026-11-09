@@ -62,7 +62,13 @@ Bei der ersten Verbindung zeigt die App den Zertifikat-Fingerprint – mit `serv
 
 ## 4. SSH-Terminal
 
-Bereich *Terminal*: Host ist die Adresse des Agenten, Port und Benutzer werden im Profil gemerkt, das Passwort nie. Beim ersten Verbinden den Hostschlüssel mit `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` vergleichen. Optional privaten Schlüssel einfügen (wird verschlüsselt im Profil gespeichert, das Passwortfeld dient dann als Passphrase). Unter der Ausgabe gibt es eine Leiste mit Strg, Alt, Esc, Tab, Pfeiltasten usw.; Schriftgröße, Einfügen und Kopieren oben rechts.
+Bereich *Terminal*: Host ist die Adresse des Agenten, Port und Benutzer werden im Profil gemerkt, das Passwort nie. Beim ersten Verbinden den Hostschlüssel mit `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` vergleichen. Optional privaten Schlüssel einfügen (wird verschlüsselt im Profil gespeichert, das Passwortfeld dient dann als Passphrase).
+
+- **Markieren:** lange drücken markiert ein Wort; mit den Griffen (oder weiter ziehen) die Auswahl anpassen – beim Ziehen zeigt eine Lupe die genaue Position. *Kopieren* / *Alles* / *Abbrechen* oben. Desktop: mit der Maus ziehen, Strg+Umschalt+C / Strg+Umschalt+V.
+- **Cursor:** Tippen in die Eingabezeile setzt den Cursor dorthin.
+- **Einfügen:** mehrzeiliger Text landet komplett in der Eingabezeile und wird erst mit Enter ausgeführt.
+- **Hintergrund (Android):** solange ein Terminal verbunden ist, hält ein Dienst die Verbindung offen; in der Benachrichtigungsleiste steht „Verbunden“ mit `>_`. *Trennen* direkt in der Benachrichtigung.
+- Unter der Ausgabe eine Leiste mit Strg, Alt, Esc, Tab, Pfeiltasten usw.; Schriftgröße, Einfügen und Kopieren oben rechts.
 
 ## 5. Passwörter
 

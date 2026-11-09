@@ -6,6 +6,7 @@ import androidx.compose.runtime.setValue
 import app.servercontrol.SshAuth
 import app.servercontrol.SshShell
 import app.servercontrol.openSsh
+import app.servercontrol.terminalKeepAlive
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
@@ -35,6 +36,7 @@ class TerminalSession(private val scope: CoroutineScope) {
         shell = sh
         connected = true
         title = "${auth.user}@$host"
+        terminalKeepAlive(true, title)
         outbox = Channel(Channel.UNLIMITED)
         val box = outbox
         writeJob = scope.launch {
@@ -51,6 +53,7 @@ class TerminalSession(private val scope: CoroutineScope) {
                 }
             }
             connected = false
+            terminalKeepAlive(false, "")
             emu.feed("\r\n\u001b[33m[Verbindung beendet]\u001b[0m\r\n".encodeToByteArray())
         }
     }
@@ -61,8 +64,14 @@ class TerminalSession(private val scope: CoroutineScope) {
         if (connected) outbox.trySend(data)
     }
 
+    /**
+     * Pastes text. Trailing line breaks are removed so nothing runs by itself:
+     * with bracketed paste (bash/zsh default) all lines land in the input line and
+     * one final Enter executes them.
+     */
     fun paste(text: String) {
-        val t = text.replace("\r\n", "\r").replace('\n', '\r')
+        val t = text.replace("\r\n", "\n").trimEnd('\n', '\r').replace('\n', '\r')
+        if (t.isEmpty()) return
         send(if (emu.bracketedPaste) "\u001b[200~$t\u001b[201~" else t)
     }
 
@@ -78,6 +87,7 @@ class TerminalSession(private val scope: CoroutineScope) {
         outbox.close()
         shell?.close()
         shell = null
+        if (connected) terminalKeepAlive(false, "")
         connected = false
     }
 }
