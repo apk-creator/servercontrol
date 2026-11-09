@@ -64,8 +64,8 @@ Bei der ersten Verbindung zeigt die App den Zertifikat-Fingerprint – mit `serv
 
 Bereich *Terminal*: Host ist die Adresse des Agenten, Port und Benutzer werden im Profil gemerkt, das Passwort nie. Beim ersten Verbinden den Hostschlüssel mit `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` vergleichen. Optional privaten Schlüssel einfügen (wird verschlüsselt im Profil gespeichert, das Passwortfeld dient dann als Passphrase).
 
-- **Markieren:** lange drücken markiert ein Wort; mit den Griffen (oder weiter ziehen) die Auswahl anpassen – beim Ziehen zeigt eine Lupe die genaue Position. *Kopieren* / *Alles* / *Abbrechen* oben. Desktop: mit der Maus ziehen, Strg+Umschalt+C / Strg+Umschalt+V.
-- **Cursor:** Tippen in die Eingabezeile setzt den Cursor dorthin.
+- **Android:** Das Terminal ist die Terminal-Komponente von [ConnectBot](https://github.com/connectbot/termlib) (libvterm): lange drücken markiert, Griffe mit Lupe, Menü mit Kopieren/Einfügen/Alles auswählen, Zwei-Finger-Zoom für die Schrift. Tippen in die Eingabezeile setzt den Cursor.
+- **Desktop:** eigener Emulator; mit der Maus markieren, Strg+Umschalt+C / Strg+Umschalt+V.
 - **Einfügen:** mehrzeiliger Text landet komplett in der Eingabezeile und wird erst mit Enter ausgeführt.
 - **Hintergrund (Android):** solange ein Terminal verbunden ist, hält ein Dienst die Verbindung offen; in der Benachrichtigungsleiste steht „Verbunden“ mit `>_`. *Trennen* direkt in der Benachrichtigung.
 - Unter der Ausgabe eine Leiste mit Strg, Alt, Esc, Tab, Pfeiltasten usw.; Schriftgröße, Einfügen und Kopieren oben rechts.
@@ -83,6 +83,6 @@ Die App speichert keine Passwörter. Auf Android sind alle Benutzer- und Passwor
 ## Entwicklung
 
 - `agent/` – Go 1.24, nur Standardbibliothek: `cd agent && go build .`
-- `client/` – Kotlin Multiplatform + Compose Multiplatform (Android + Desktop): `cd client && ./gradlew :composeApp:run` bzw. `:composeApp:assembleRelease`
+- `client/` – Kotlin Multiplatform + Compose Multiplatform (Android + Desktop); Android-Terminal: `org.connectbot:termlib` (Apache-2.0): `cd client && ./gradlew :composeApp:run` bzw. `:composeApp:assembleRelease`
 - CI: `.github/workflows/build.yml` baut Agent, APK, .deb und .msi; ein Tag `v*` erzeugt ein Release.
 - Signierung: Ohne Secrets wird `client/composeApp/signing/servercontrol.keystore` verwendet (privates Repo). Für einen eigenen Schlüssel die Secrets `SIGNING_KEYSTORE_BASE64`, `SIGNING_STORE_PASSWORD`, `SIGNING_KEY_ALIAS`, `SIGNING_KEY_PASSWORD` setzen (Achtung: Schlüsselwechsel erfordert Neuinstallation).
