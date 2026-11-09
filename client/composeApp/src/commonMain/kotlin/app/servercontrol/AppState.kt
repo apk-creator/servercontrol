@@ -57,7 +57,7 @@ class AppState(
     fun terminalSession(): TerminalSession = terminal ?: TerminalSession(scope).also { terminal = it }
 
     private fun closeTerminal() {
-        terminal?.close()
+        terminal?.dispose()
         terminal = null
     }
 

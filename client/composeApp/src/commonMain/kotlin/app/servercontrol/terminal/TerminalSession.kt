@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import app.servercontrol.SshAuth
 import app.servercontrol.SshShell
+import app.servercontrol.ioDispatcher
 import app.servercontrol.openSsh
 import app.servercontrol.terminalKeepAlive
 import kotlinx.coroutines.CoroutineScope
@@ -12,17 +13,20 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
-/** One SSH terminal: emulator + shell + ordered writer. Lives in AppState so it survives section switches. */
 /** Everything that goes to the SSH server runs through one writer coroutine on an IO thread. */
 private sealed interface Outgoing {
     class Data(val bytes: ByteArray) : Outgoing
     class Resize(val cols: Int, val rows: Int) : Outgoing
 }
 
-/** One SSH terminal: emulator + shell + ordered writer. Lives in AppState so it survives section switches. */
+/**
+ * One SSH terminal: emulator backend + shell + ordered writer.
+ * Lives in AppState so it survives section switches (and, on Android, the app going to the background).
+ * Like ConnectBot: all network I/O runs on IO threads, never on the UI thread.
+ */
 class TerminalSession(private val scope: CoroutineScope) {
-    val emu = TerminalEmulator(80, 24)
     var connected by mutableStateOf(false)
         private set
     var title by mutableStateOf("")
@@ -33,22 +37,24 @@ class TerminalSession(private val scope: CoroutineScope) {
     private var writeJob: Job? = null
     private var outbox = Channel<Outgoing>(Channel.UNLIMITED)
 
-    init {
-        emu.onResponse = { send(it) }
-    }
+    val backend: TerminalBackend = createTerminalBackend(
+        onInput = { send(it) },
+        onResize = { c, r -> if (connected) outbox.trySend(Outgoing.Resize(c, r)) },
+    )
 
     /** Throws SshHostKeyUnknown / SshHostKeyChanged / auth errors. */
     suspend fun connect(host: String, port: Int, auth: SshAuth, knownHostKey: String) {
         close()
-        val sh = openSsh(host, port, auth, knownHostKey, emu.cols, emu.rows)
+        val sh = openSsh(host, port, auth, knownHostKey, backend.cols, backend.rows)
         shell = sh
         connected = true
         title = "${auth.user}@$host"
         terminalKeepAlive(true, title)
         outbox = Channel(Channel.UNLIMITED)
         val box = outbox
-        // Network I/O must never happen on the UI thread (Android aborts it, which corrupts the SSH stream).
-        writeJob = scope.launch(Dispatchers.IO) {
+        // the grid may have changed while connecting
+        box.trySend(Outgoing.Resize(backend.cols, backend.rows))
+        writeJob = scope.launch(ioDispatcher) {
             for (msg in box) runCatching {
                 when (msg) {
                     is Outgoing.Data -> sh.write(msg.bytes)
@@ -56,22 +62,21 @@ class TerminalSession(private val scope: CoroutineScope) {
                 }
             }
         }
-        readJob = scope.launch {
-            val buf = ByteArray(16 * 1024)
-            try {
-                while (true) {
-                    val n = sh.read(buf)
-                    if (n < 0) break
-                    if (n > 0) {
-                        emu.feed(buf, n)
-                        if (emu.title.isNotBlank()) title = emu.title
-                    }
-                }
-            } finally {
+        readJob = scope.launch(ioDispatcher) {
+            val buf = ByteArray(32 * 1024)
+            while (true) {
+                val n = sh.read(buf)
+                if (n < 0) break
+                if (n > 0) backend.write(buf.copyOf(n))
+            }
+            // connection ended by the server (not by close())
+            withContext(Dispatchers.Main) {
                 if (shell === sh) {
+                    shell = null
                     connected = false
                     terminalKeepAlive(false, "")
-                    runCatching { emu.feed("\r\n\u001b[33m[Verbindung beendet]\u001b[0m\r\n".encodeToByteArray()) }
+                    runCatching { backend.write("\r\n\u001b[33m[Verbindung beendet]\u001b[0m\r\n".encodeToByteArray()) }
+                    scope.launch(ioDispatcher) { runCatching { sh.close() } }
                 }
             }
         }
@@ -85,19 +90,12 @@ class TerminalSession(private val scope: CoroutineScope) {
 
     /**
      * Pastes text. Trailing line breaks are removed so nothing runs by itself:
-     * with bracketed paste (bash/zsh default) all lines land in the input line and
+     * with bracketed paste (bash default) all lines land in the input line and
      * one final Enter executes them.
      */
     fun paste(text: String) {
-        val t = text.replace("\r\n", "\n").trimEnd('\n', '\r').replace('\n', '\r')
-        if (t.isEmpty()) return
-        send(if (emu.bracketedPaste) "\u001b[200~$t\u001b[201~" else t)
-    }
-
-    fun resize(cols: Int, rows: Int) {
-        if (cols == emu.cols && rows == emu.rows) return
-        emu.resize(cols, rows)
-        if (connected) outbox.trySend(Outgoing.Resize(cols, rows))
+        val t = text.replace("\r\n", "\n").trimEnd('\n', '\r')
+        if (t.isNotEmpty() && connected) backend.paste(t)
     }
 
     fun close() {
@@ -108,6 +106,12 @@ class TerminalSession(private val scope: CoroutineScope) {
         outbox.close()
         if (connected) terminalKeepAlive(false, "")
         connected = false
-        if (sh != null) scope.launch(Dispatchers.IO) { runCatching { sh.close() } }
+        if (sh != null) scope.launch(ioDispatcher) { runCatching { sh.close() } }
+    }
+
+    /** Close and release the emulator. */
+    fun dispose() {
+        close()
+        backend.dispose()
     }
 }

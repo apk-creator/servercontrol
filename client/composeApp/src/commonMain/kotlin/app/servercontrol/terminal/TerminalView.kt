@@ -155,7 +155,7 @@ class TerminalInputState {
 }
 
 /** Applies sticky Ctrl/Alt from the key bar to typed text. */
-private fun applyModifiers(text: String, mods: TerminalInputState): String {
+fun applyModifiers(text: String, mods: TerminalInputState): String {
     if (text.length != 1) return text
     var t = text
     if (mods.ctrlArmed) {
@@ -279,14 +279,18 @@ val SelColor = Color(0x66FFFFFF)
 private const val TAP = 1
 private const val MOVE = 2
 
+/** Built-in terminal renderer (used on the desktop). */
 @Composable
 fun TerminalView(
-    session: TerminalSession,
+    emu: TerminalEmulator,
+    connected: Boolean,
+    send: (String) -> Unit,
+    paste: (String) -> Unit,
+    onResize: (Int, Int) -> Unit,
     fontSizeSp: Float,
     mods: TerminalInputState,
     modifier: Modifier = Modifier,
 ) {
-    val emu = session.emu
     val measurer = rememberTextMeasurer(cacheSize = 1024)
     val style = remember(fontSizeSp) { TextStyle(fontFamily = FontFamily.Monospace, fontSize = fontSizeSp.sp, color = TermFg) }
     val cell = remember(fontSizeSp) { measurer.measure("W", style).size }
@@ -307,7 +311,7 @@ fun TerminalView(
         if (text.isEmpty()) return
         toBottom()
         selection = null
-        session.send(applyModifiers(text, mods))
+        send(applyModifiers(text, mods))
     }
 
     fun copySelection() {
@@ -318,7 +322,7 @@ fun TerminalView(
     }
 
     fun pasteClipboard() {
-        clipboard.getText()?.text?.let { toBottom(); selection = null; session.paste(it) }
+        clipboard.getText()?.text?.let { toBottom(); selection = null; paste(it) }
     }
 
     fun onKey(e: KeyEvent): Boolean {
@@ -329,16 +333,16 @@ fun TerminalView(
         keySequence(e.key, emu.appCursorKeys)?.let { seq ->
             val s = if (e.isAltPressed || mods.altArmed) { mods.altArmed = false; "\u001b$seq" } else seq
             toBottom(); selection = null
-            session.send(s)
+            send(s)
             return true
         }
         if (e.isCtrlPressed) {
             val i = letterKeys.indexOf(e.key)
-            if (i >= 0) { toBottom(); selection = null; session.send((i + 1).toChar().toString()); return true }
+            if (i >= 0) { toBottom(); selection = null; send((i + 1).toChar().toString()); return true }
         }
         if (e.isAltPressed && e.utf16CodePoint > 0) {
             toBottom()
-            session.send("\u001b" + e.utf16CodePoint.toChar())
+            send("\u001b" + e.utf16CodePoint.toChar())
             return true
         }
         return false
@@ -351,7 +355,7 @@ fun TerminalView(
         val ch = cell.height.coerceAtLeast(1)
         val cols = (constraints.maxWidth / cw).coerceAtLeast(20)
         val rows = (constraints.maxHeight / ch).coerceAtLeast(5)
-        LaunchedEffect(cols, rows) { session.resize(cols, rows) }
+        LaunchedEffect(cols, rows) { onResize(cols, rows) }
 
         fun maxScroll() = if (emu.useAlt) 0f else emu.scrollback.size.toFloat()
         fun cellAt(p: Offset): Cell {
@@ -380,11 +384,11 @@ fun TerminalView(
             // tap into the input line moves the cursor (sends arrow keys)
             val c = cellAt(p)
             val cursorAbs = emu.scrollback.size + emu.cursorY
-            if (scrollLines.toInt() == 0 && c.line == cursorAbs && session.connected) {
+            if (scrollLines.toInt() == 0 && c.line == cursorAbs && connected) {
                 val dx = c.col - emu.cursorX
                 if (dx != 0) {
                     val seq = keySequence(if (dx > 0) Key.DirectionRight else Key.DirectionLeft, emu.appCursorKeys)!!
-                    session.send(seq.repeat(kotlin.math.abs(dx)))
+                    send(seq.repeat(kotlin.math.abs(dx)))
                 }
             }
         }
@@ -476,7 +480,7 @@ fun TerminalView(
                 }
         ) {
             @Suppress("UNUSED_VARIABLE") val v = emu.version // redraw on change
-            drawTerminal(emu, measurer, style, cw, ch, scrollLines.toInt(), session.connected, selection)
+            drawTerminal(emu, measurer, style, cw, ch, scrollLines.toInt(), connected, selection)
             if (scrollLines.toInt() > 0) {
                 drawRect(Color(0x66FFFFFF), Offset(size.width - 4.dp.toPx(), 0f), Size(4.dp.toPx(), size.height))
             }
@@ -563,7 +567,7 @@ fun TerminalView(
                     translate(size.width / 2 - at.x * zoom, size.height / 2 - at.y * zoom)
                     scale(zoom, zoom, pivot = Offset.Zero)
                 }) {
-                    drawTerminal(emu, measurer, style, cw, ch, scrollLines.toInt(), session.connected, selection)
+                    drawTerminal(emu, measurer, style, cw, ch, scrollLines.toInt(), connected, selection)
                 }
             }
         }
@@ -581,7 +585,7 @@ fun TerminalView(
                         val typed = if (t.startsWith(SENTINEL)) t.substring(SENTINEL.length) else t.trim()
                         // multi-line text (pasted via keyboard) goes in as a paste: no auto-execution
                         if (typed.length > 1 && (typed.contains('\n') || typed.contains('\r'))) {
-                            toBottom(); selection = null; session.paste(typed)
+                            toBottom(); selection = null; paste(typed)
                         } else {
                             sendUser(typed.replace('\n', '\r'))
                         }
@@ -605,29 +609,30 @@ fun TerminalView(
 /** Extra keys for touch keyboards. */
 @Composable
 fun TerminalKeyBar(session: TerminalSession, mods: TerminalInputState) {
-    val app = session.emu.appCursorKeys
+    val b = session.backend
     val keys = listOf(
-        "Esc" to "\u001b", "Tab" to "\t", "←" to keySequence(Key.DirectionLeft, app)!!, "↑" to keySequence(Key.DirectionUp, app)!!,
-        "↓" to keySequence(Key.DirectionDown, app)!!, "→" to keySequence(Key.DirectionRight, app)!!,
-        "Pos1" to keySequence(Key.MoveHome, app)!!, "Ende" to keySequence(Key.MoveEnd, app)!!,
-        "Bild↑" to "\u001b[5~", "Bild↓" to "\u001b[6~", "|" to "|", "/" to "/", "-" to "-", "~" to "~", ":" to ":",
-        "^C" to "\u0003", "^D" to "\u0004", "^Z" to "\u001a",
+        "Esc" to TermKey.ESC, "Tab" to TermKey.TAB, "←" to TermKey.LEFT, "↑" to TermKey.UP,
+        "↓" to TermKey.DOWN, "→" to TermKey.RIGHT, "Pos1" to TermKey.HOME, "Ende" to TermKey.END,
+        "Bild↑" to TermKey.PAGE_UP, "Bild↓" to TermKey.PAGE_DOWN,
     )
+    val chars = listOf('|', '/', '-', '~', ':')
+    val ctrl = listOf("^C" to 'c', "^D" to 'd', "^Z" to 'z')
     Row(
         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp, vertical = 2.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         ToggleKey("Strg", mods.ctrlArmed) { mods.ctrlArmed = !mods.ctrlArmed }
         ToggleKey("Alt", mods.altArmed) { mods.altArmed = !mods.altArmed }
-        keys.forEach { (label, seq) ->
-            OutlinedButton(
-                onClick = {
-                    val s = if (mods.altArmed) { mods.altArmed = false; "\u001b$seq" } else seq
-                    session.send(s)
-                },
-                contentPadding = PaddingValues(horizontal = 10.dp), modifier = Modifier.height(36.dp),
-            ) { Text(label, fontSize = 13.sp) }
-        }
+        keys.forEach { (label, k) -> BarKey(label) { b.sendKey(k, mods) } }
+        chars.forEach { c -> BarKey(c.toString()) { b.sendChar(c, mods) } }
+        ctrl.forEach { (label, c) -> BarKey(label) { mods.ctrlArmed = true; b.sendChar(c, mods) } }
+    }
+}
+
+@Composable
+private fun BarKey(label: String, onClick: () -> Unit) {
+    OutlinedButton(onClick = onClick, contentPadding = PaddingValues(horizontal = 10.dp), modifier = Modifier.height(36.dp)) {
+        Text(label, fontSize = 13.sp)
     }
 }
 

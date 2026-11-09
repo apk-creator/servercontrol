@@ -29,6 +29,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
@@ -38,6 +39,16 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
+
+/** Window icon from resources/icon.png */
+private val appIcon: androidx.compose.ui.graphics.painter.Painter? by lazy {
+    runCatching {
+        val bytes = Thread.currentThread().contextClassLoader.getResourceAsStream("icon.png")!!.use { it.readBytes() }
+        androidx.compose.ui.graphics.painter.BitmapPainter(
+            org.jetbrains.skia.Image.makeFromEncoded(bytes).toComposeImageBitmap()
+        )
+    }.getOrNull()
+}
 
 fun main() = application {
     val scope = remember { CoroutineScope(SupervisorJob() + Dispatchers.Main) }
@@ -58,7 +69,7 @@ fun main() = application {
         },
         title = title,
         state = windowState,
-        icon = @Suppress("DEPRECATION") androidx.compose.ui.res.painterResource("icon.png"),
+        icon = appIcon,
     ) {
         if (s == null) {
             UnlockScreen { pass ->
