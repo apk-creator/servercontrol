@@ -8,7 +8,7 @@ plugins {
     id("com.android.application")
 }
 
-val appVersion = "1.1.0"
+val appVersion = "1.2.0"
 val ktor = "3.1.3"
 
 kotlin {
@@ -100,11 +100,15 @@ compose.desktop {
             vendor = "apk-creator"
             modules("java.naming", "jdk.crypto.ec", "java.logging", "java.security.jgss")
             windows {
+                iconFile.set(project.file("icons/icon.ico"))
                 menu = true
                 shortcut = true
                 upgradeUuid = "5f0b7c1e-6a43-4c6a-9b3e-2d8e7b1a9c40"
             }
-            linux { shortcut = true }
+            linux {
+                iconFile.set(project.file("icons/icon.png"))
+                shortcut = true
+            }
         }
     }
 }

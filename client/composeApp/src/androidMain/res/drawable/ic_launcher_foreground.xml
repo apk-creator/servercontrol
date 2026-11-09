@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ServerControl logo: three stacked server units, black on white -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <group>
+        <path android:pathData="M32,31 H76 A4,4 0 0 1 80,35 V38 A4,4 0 0 1 76,42 H32 A4,4 0 0 1 28,38 V35 A4,4 0 0 1 32,31 Z"
+            android:strokeColor="#FF000000" android:strokeWidth="3" android:fillColor="#00000000"/>
+        <path android:pathData="M32,48 H76 A4,4 0 0 1 80,52 V55 A4,4 0 0 1 76,59 H32 A4,4 0 0 1 28,55 V52 A4,4 0 0 1 32,48 Z"
+            android:strokeColor="#FF000000" android:strokeWidth="3" android:fillColor="#00000000"/>
+        <path android:pathData="M32,65 H76 A4,4 0 0 1 80,69 V72 A4,4 0 0 1 76,76 H32 A4,4 0 0 1 28,72 V69 A4,4 0 0 1 32,65 Z"
+            android:strokeColor="#FF000000" android:strokeWidth="3" android:fillColor="#00000000"/>
+        <path android:pathData="M35,36.5 m-2.5,0 a2.5,2.5 0 1,0 5,0 a2.5,2.5 0 1,0 -5,0 M35,53.5 m-2.5,0 a2.5,2.5 0 1,0 5,0 a2.5,2.5 0 1,0 -5,0 M35,70.5 m-2.5,0 a2.5,2.5 0 1,0 5,0 a2.5,2.5 0 1,0 -5,0"
+            android:fillColor="#FF000000"/>
+        <path android:pathData="M52,36.5 H72 M52,53.5 H72 M52,70.5 H72"
+            android:strokeColor="#FF000000" android:strokeWidth="3" android:strokeLineCap="round" android:fillColor="#00000000"/>
+    </group>
+</vector>

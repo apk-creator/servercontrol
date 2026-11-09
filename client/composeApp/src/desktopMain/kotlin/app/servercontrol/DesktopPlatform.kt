@@ -199,3 +199,6 @@ actual suspend fun pickFile(): ByteArray? {
     } ?: return null
     return withContext(Dispatchers.IO) { path.readBytes() }
 }
+
+/** Desktop: the session stays connected as long as the window is open. */
+actual fun terminalKeepAlive(active: Boolean, title: String) {}
