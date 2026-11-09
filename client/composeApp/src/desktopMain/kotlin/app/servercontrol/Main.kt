@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -28,7 +27,6 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
@@ -125,10 +123,8 @@ fun UnlockScreen(onUnlock: suspend (CharArray) -> Unit) {
                         if (firstRun) "Lege ein Master-Passwort fest. Damit werden die Server-Adressen auf diesem Rechner verschlüsselt (am besten in KeePass speichern)."
                         else "Master-Passwort eingeben (KeePassXC Auto-Type möglich).",
                     )
-                    OutlinedTextField(pw, { pw = it }, Modifier.fillMaxWidth().focusRequester(focus).then(enter),
-                        label = { Text("Master-Passwort") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
-                    if (firstRun) OutlinedTextField(pw2, { pw2 = it }, Modifier.fillMaxWidth().then(enter),
-                        label = { Text("Wiederholen") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
+                    PasswordInput(pw, { pw = it }, "Master-Passwort", Modifier.fillMaxWidth().focusRequester(focus).then(enter))
+                    if (firstRun) PasswordInput(pw2, { pw2 = it }, "Wiederholen", Modifier.fillMaxWidth().then(enter))
                     Button(onClick = submit, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text(if (firstRun) "Festlegen" else "Entsperren") }
                     err?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 }
