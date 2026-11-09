@@ -178,7 +178,7 @@ private fun NcUsers(api: ApiClient, host: ActionHost, ask: (Confirm) -> Unit) {
                                 host.post("Kontingent", "$NC/action/user-quota", """{"user":${jsonString(id)},"quota":${jsonString(quota.trim())}}""", reload)
                             }) { Text("Setzen") }
                         }
-                        Text("Neues Passwort (z. B. aus KeePass generiert):", style = MaterialTheme.typography.bodySmall)
+                        Text("Neues Passwort:", style = MaterialTheme.typography.bodySmall)
                         CredentialFields(id, {}, pw, { pw = it }, onSubmit = {})
                         TextButton(enabled = pw.length >= 10, onClick = {
                             ask(Confirm("Passwort von $id zurücksetzen?", "Das neue Passwort gilt sofort.") {

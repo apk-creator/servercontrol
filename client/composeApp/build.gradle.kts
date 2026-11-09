@@ -8,7 +8,7 @@ plugins {
     id("com.android.application")
 }
 
-val appVersion = "1.1.1"
+val appVersion = "1.1.0"
 val ktor = "3.1.3"
 
 kotlin {
@@ -34,7 +34,6 @@ kotlin {
         val jsch = "com.github.mwiede:jsch:0.2.26"
         androidMain.dependencies {
             implementation("androidx.activity:activity-compose:1.10.1")
-            implementation("androidx.lifecycle:lifecycle-process:2.8.7")
             implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
             implementation(jsch)
             // ed25519 / curve25519 for SSH on older Android versions

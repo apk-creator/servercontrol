@@ -1,12 +1,8 @@
 package app.servercontrol.net
 
-import app.servercontrol.VpnController
 import app.servercontrol.createHttpClient
 import app.servercontrol.data.ServerProfile
 import io.ktor.client.HttpClient
-import kotlinx.coroutines.delay
-
-enum class Route { LAN, VPN }
 
 sealed interface Probe {
     data object Ok : Probe
@@ -16,17 +12,8 @@ sealed interface Probe {
 
 class ConnectException(message: String) : Exception(message)
 
-/**
- * Picks LAN or VPN and switches WireGuard automatically:
- *  1. agent reachable on the LAN address → no VPN
- *  2. otherwise → tunnel up, wait for the agent behind the tunnel
- * The tunnel is only switched off again if this app switched it on.
- */
-class ConnectionManager(private val vpn: VpnController) {
-    var route: Route? = null
-        private set
-    var vpnStartedByApp = false
-        private set
+/** Connects to the agent and pins its TLS certificate (trust on first use). */
+class ConnectionManager {
     private var http: HttpClient? = null
     var status: (String) -> Unit = {}
 
@@ -53,38 +40,10 @@ class ConnectionManager(private val vpn: VpnController) {
         var seen = ""
         var client = createHttpClient(profile.certFingerprint) { seen = it }
         http = client
-        val vpnUrl = profile.vpnUrl.ifBlank { profile.lanUrl }
+        val url = profile.lanUrl
 
-        status("Prüfe Heimnetz …")
-        var url = profile.lanUrl
-        var result = probe(client, url, 2_500)
-        route = Route.LAN
-
-        if (result == Probe.Unreachable) {
-            if (!vpn.isAvailable(profile.wgTunnel, profile.vpnUpCommand, profile.vpnDownCommand)) {
-                throw ConnectException("Server im Heimnetz nicht erreichbar und kein WireGuard-Tunnel konfiguriert.")
-            }
-            status("Außerhalb des Heimnetzes – aktiviere WireGuard „${profile.wgTunnel}“ …")
-            // If the tunnel is already up (e.g. switched on manually), we don't own it.
-            if (vpnUrl != url && probe(client, vpnUrl, 2_000) == Probe.Ok) {
-                result = Probe.Ok
-            } else {
-                vpn.up(profile.wgTunnel, profile.vpnUpCommand).getOrElse {
-                    throw ConnectException("WireGuard konnte nicht aktiviert werden: ${it.message}")
-                }
-                vpnStartedByApp = true
-                status("Warte auf Tunnel …")
-                for (i in 0 until 15) {
-                    delay(1_500)
-                    result = probe(client, vpnUrl, 2_500)
-                    if (result != Probe.Unreachable) break
-                }
-            }
-            url = vpnUrl
-            route = Route.VPN
-        }
-
-        when (val r = result) {
+        status("Verbinde mit $url …")
+        when (val r = probe(client, url, 8_000)) {
             is Probe.CertMismatch -> {
                 close()
                 throw ConnectException(
@@ -94,7 +53,7 @@ class ConnectionManager(private val vpn: VpnController) {
             }
             Probe.Unreachable -> {
                 close()
-                throw ConnectException("Agent unter $url nicht erreichbar.")
+                throw ConnectException("Agent unter $url nicht erreichbar. Von unterwegs vorher das VPN der Fritzbox verbinden.")
             }
             Probe.Ok -> {}
         }
@@ -110,18 +69,12 @@ class ConnectionManager(private val vpn: VpnController) {
             client = createHttpClient(fingerprint) {}
             http = client
         }
-        status("Verbunden über ${if (route == Route.LAN) "Heimnetz" else "WireGuard"}")
+        status("Verbunden")
         return ApiClient(client, url) to fingerprint
     }
 
-    /** Closes the HTTP client and switches the tunnel off if we switched it on. */
-    suspend fun close(profile: ServerProfile? = null) {
+    fun close() {
         http?.close()
         http = null
-        if (vpnStartedByApp && profile != null) {
-            vpn.down(profile.wgTunnel, profile.vpnDownCommand)
-        }
-        if (profile != null) vpnStartedByApp = false
-        route = null
     }
 }

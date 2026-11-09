@@ -164,7 +164,7 @@ private fun KopiaConnectDialog(api: ApiClient, onDone: () -> Unit) {
                     Checkbox(store, { store = it }); Text("Passwort auf dem Server hinterlegen (für Aktionen aus der App)", fontSize = 13.sp)
                 }
                 OutlinedTextField(sources, { sources = it }, Modifier.fillMaxWidth(), label = { Text("Snapshot-Quellen, eine pro Zeile (optional)") }, minLines = 2)
-                if (create) Text("Wichtig: Ohne Passwort sind die Daten nicht wiederherstellbar – in KeePass speichern!", color = StatusWarn, fontSize = 12.sp)
+                if (create) Text("Wichtig: Ohne Passwort sind die Daten nicht wiederherstellbar – sicher aufbewahren!", color = StatusWarn, fontSize = 12.sp)
             }
         },
         confirmButton = {

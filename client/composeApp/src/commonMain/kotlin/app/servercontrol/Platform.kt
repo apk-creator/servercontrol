@@ -10,15 +10,6 @@ interface SecureStore {
     suspend fun save(plain: String)
 }
 
-/** Controls the WireGuard tunnel. */
-interface VpnController {
-    val description: String
-    /** true if the platform can switch the tunnel for this profile */
-    fun isAvailable(tunnel: String, upCmd: String, downCmd: String): Boolean
-    suspend fun up(tunnel: String, upCmd: String): Result<Unit>
-    suspend fun down(tunnel: String, downCmd: String): Result<Unit>
-}
-
 /**
  * HTTP client that only trusts the agent certificate with [pinnedFingerprint].
  * If [pinnedFingerprint] is empty, any certificate is accepted once and its
@@ -28,8 +19,7 @@ expect fun createHttpClient(pinnedFingerprint: String, onCertificate: (String) -
 
 /**
  * Username/password inputs. Android uses native EditTexts with autofill hints
- * (KeePassDX / Keepass2Android autofill), desktop uses normal fields that work
- * with KeePassXC Auto-Type.
+ * (password managers can fill them), desktop uses normal fields with Tab/Enter handling.
  */
 @Composable
 expect fun CredentialFields(

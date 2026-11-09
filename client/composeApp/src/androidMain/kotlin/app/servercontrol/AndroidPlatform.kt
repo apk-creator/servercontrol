@@ -1,8 +1,6 @@
 package app.servercontrol
 
 import android.content.Context
-import android.content.Intent
-import android.content.pm.PackageManager
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.text.InputType
@@ -87,35 +85,6 @@ class AndroidSecureStore(context: Context) : SecureStore {
     }
 }
 
-// ---------------- WireGuard (official app, remote control intents) ----------------
-
-class AndroidVpn(private val context: Context) : VpnController {
-    override val description =
-        "Name des Tunnels in der WireGuard-App. Dort unter Einstellungen „Fernsteuerung durch Apps erlauben“ aktivieren."
-
-    private fun installed() = runCatching {
-        context.packageManager.getPackageInfo(WG_PACKAGE, 0); true
-    }.getOrDefault(false)
-
-    fun hasPermission() = context.checkSelfPermission(PERMISSION) == PackageManager.PERMISSION_GRANTED
-
-    override fun isAvailable(tunnel: String, upCmd: String, downCmd: String) = tunnel.isNotBlank() && installed()
-
-    private fun send(action: String, tunnel: String): Result<Unit> = runCatching {
-        if (!installed()) error("WireGuard-App ist nicht installiert")
-        if (!hasPermission()) error("Berechtigung zur WireGuard-Steuerung fehlt (App-Einstellungen → Berechtigungen)")
-        context.sendBroadcast(Intent(action).setPackage(WG_PACKAGE).putExtra("tunnel", tunnel))
-    }
-
-    override suspend fun up(tunnel: String, upCmd: String) = send("$WG_PACKAGE.action.SET_TUNNEL_UP", tunnel)
-    override suspend fun down(tunnel: String, downCmd: String) = send("$WG_PACKAGE.action.SET_TUNNEL_DOWN", tunnel)
-
-    companion object {
-        const val WG_PACKAGE = "com.wireguard.android"
-        const val PERMISSION = "com.wireguard.android.permission.CONTROL_TUNNELS"
-    }
-}
-
 // ---------------- pinned TLS ----------------
 
 internal fun sha256Fingerprint(cert: X509Certificate): String =
@@ -148,7 +117,7 @@ actual fun createHttpClient(pinnedFingerprint: String, onCertificate: (String) -
     }
 }
 
-// ---------------- credentials with Android autofill (KeePassDX, Keepass2Android) ----------------
+// ---------------- credentials (native fields with Android autofill hints) ----------------
 
 @Composable
 actual fun CredentialFields(

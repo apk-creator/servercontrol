@@ -40,7 +40,6 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.servercontrol.data.ServerProfile
-import app.servercontrol.net.Route
 import app.servercontrol.ui.screens.*
 import kotlinx.coroutines.launch
 import kotlin.random.Random
@@ -103,7 +102,6 @@ fun ProfilesScreen(state: AppState) {
                     supportingContent = {
                         Text(buildString {
                             append(p.lanUrl)
-                            if (p.wgTunnel.isNotBlank()) append("  ·  WireGuard: ${p.wgTunnel}")
                             if (p.certFingerprint.isBlank()) append("  ·  Zertifikat noch nicht bestätigt")
                         })
                     },
@@ -130,16 +128,9 @@ fun ProfileEditor(state: AppState, initial: ServerProfile, onDone: () -> Unit) {
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(p.name, { p = p.copy(name = it) }, label = { Text("Name") }, singleLine = true)
-                OutlinedTextField(p.lanUrl, { p = p.copy(lanUrl = it.trim()) }, label = { Text("Adresse im Heimnetz") },
-                    placeholder = { Text("https://192.168.178.10:8443") }, singleLine = true)
-                OutlinedTextField(p.vpnUrl, { p = p.copy(vpnUrl = it.trim()) }, label = { Text("Adresse über VPN (optional)") },
-                    placeholder = { Text("https://10.8.0.1:8443") }, singleLine = true)
-                OutlinedTextField(p.wgTunnel, { p = p.copy(wgTunnel = it.trim()) }, label = { Text("WireGuard-Tunnelname") },
-                    supportingText = { Text(state.vpn.description) }, singleLine = true)
-                if (isDesktop) {
-                    OutlinedTextField(p.vpnUpCommand, { p = p.copy(vpnUpCommand = it) }, label = { Text("Befehl Tunnel an (leer = Standard)") }, singleLine = true)
-                    OutlinedTextField(p.vpnDownCommand, { p = p.copy(vpnDownCommand = it) }, label = { Text("Befehl Tunnel aus (leer = Standard)") }, singleLine = true)
-                }
+                OutlinedTextField(p.lanUrl, { p = p.copy(lanUrl = it.trim()) }, label = { Text("Adresse des Agenten") },
+                    placeholder = { Text("https://192.168.178.179:8443") }, singleLine = true,
+                    supportingText = { Text("Von unterwegs vorher das VPN der Fritzbox verbinden.") })
                 Text(
                     if (p.certFingerprint.isBlank()) "Zertifikat: wird bei der ersten Verbindung bestätigt."
                     else "Zertifikat: ${p.certFingerprint.take(23)}…",
@@ -155,8 +146,7 @@ fun ProfileEditor(state: AppState, initial: ServerProfile, onDone: () -> Unit) {
         },
         confirmButton = {
             TextButton(
-                enabled = p.name.isNotBlank() && p.lanUrl.startsWith("https://") && p.lanUrl.length > 9 &&
-                    (p.vpnUrl.isBlank() || p.vpnUrl.startsWith("https://")),
+                enabled = p.name.isNotBlank() && p.lanUrl.startsWith("https://") && p.lanUrl.length > 9,
                 onClick = { state.saveProfile(p); onDone() },
             ) { Text("Speichern") }
         },
@@ -187,7 +177,6 @@ fun LoginScreen(state: AppState, profile: ServerProfile) {
         Box(Modifier.padding(pad).fillMaxSize(), contentAlignment = Alignment.TopCenter) {
             Column(Modifier.widthIn(max = 420.dp).padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Anmelden bei ${profile.name}", style = MaterialTheme.typography.titleLarge)
-                Text("Zugangsdaten aus KeePass (Autofill bzw. Auto-Type).", style = MaterialTheme.typography.bodySmall)
                 CredentialFields(user, { user = it }, pw, { pw = it }, onSubmit = submit)
                 Button(onClick = submit, enabled = state.busy == null, modifier = Modifier.fillMaxWidth()) { Text("Verbinden") }
                 state.busy?.let {
@@ -253,26 +242,22 @@ fun MainScreen(state: AppState) {
                     title = {
                         Column {
                             Text(state.section.title)
-                            Text(
-                                session.profile.name + " · " + if (session.route == Route.VPN) "über WireGuard" else "Heimnetz",
-                                style = MaterialTheme.typography.bodySmall,
-                            )
+                            Text(session.profile.name, style = MaterialTheme.typography.bodySmall)
                         }
                     },
                     navigationIcon = {
                         if (!wide) IconButton(onClick = { scope.launch { drawer.open() } }) { Icon(Icons.Default.Menu, "Menü") }
                     },
                     actions = {
-                        if (session.route == Route.VPN) Icon(Icons.Default.VpnLock, "VPN aktiv", Modifier.padding(end = 8.dp))
                         IconButton(onClick = { state.logout() }) { Icon(Icons.AutoMirrored.Filled.Logout, "Abmelden") }
                     },
                 )
             }) { pad ->
                 Box(Modifier.padding(pad).fillMaxSize()) {
-                    if (state.paused || state.busy != null) {
+                    if (state.busy != null) {
                         Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                             CircularProgressIndicator()
-                            Text(state.busy ?: "Pausiert", Modifier.padding(12.dp))
+                            Text(state.busy ?: "", Modifier.padding(12.dp))
                         }
                     } else {
                         SectionContent(state, session)

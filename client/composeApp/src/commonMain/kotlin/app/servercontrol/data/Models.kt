@@ -13,23 +13,16 @@ val AppJson = Json {
 
 /**
  * One server connection. Everything in here is stored encrypted on the device.
- * Passwords are never stored – they come from KeePass via autofill / auto-type.
+ * Passwords are never stored.
  */
 @Serializable
 data class ServerProfile(
     val id: String,
     val name: String,
-    /** Agent URL inside the home network, e.g. https://192.168.178.10:8443 */
+    /** Agent URL, e.g. https://192.168.178.179:8443 (from outside: connect the Fritzbox VPN first) */
     val lanUrl: String,
-    /** Agent URL through the VPN; empty = same as lanUrl */
-    val vpnUrl: String = "",
-    /** WireGuard tunnel name (Android: name in the WireGuard app; Desktop: used in the commands) */
-    val wgTunnel: String = "",
     /** SHA-256 fingerprint of the agent certificate (pinned after first trust) */
     val certFingerprint: String = "",
-    /** Desktop only: commands to bring the tunnel up/down, {tunnel} is replaced */
-    val vpnUpCommand: String = "",
-    val vpnDownCommand: String = "",
     /** SSH terminal (host = same address as the agent) */
     val sshPort: Int = 22,
     val sshUser: String = "",
