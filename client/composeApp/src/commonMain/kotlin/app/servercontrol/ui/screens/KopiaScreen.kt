@@ -92,8 +92,12 @@ fun KopiaScreen(api: ApiClient) {
     if (connect) KopiaConnectDialog(api) { connect = false; refresh++ }
 }
 
-private fun idFromFile(path: String): String =
-    path.substringAfterLast('/').removeSuffix(".config").lowercase().replace(Regex("[^a-z0-9_-]"), "-").trim('-').take(32).ifBlank { "repo" }
+/** /root/.config/kopia-data1/repository.config → "data1", /root/.config/kopia/repository.config → "kopia" */
+private fun idFromFile(path: String): String {
+    val file = path.substringAfterLast('/').removeSuffix(".config")
+    val base = if (file == "repository") path.substringBeforeLast('/').substringAfterLast('/').removePrefix("kopia-") else file
+    return base.lowercase().replace(Regex("[^a-z0-9_-]"), "-").trim('-').take(32).ifBlank { "repo" }
+}
 
 @Composable
 private fun KopiaDiscoverDialog(api: ApiClient, onPick: (KopiaRepoDef) -> Unit, onDismiss: () -> Unit) {
@@ -103,7 +107,7 @@ private fun KopiaDiscoverDialog(api: ApiClient, onPick: (KopiaRepoDef) -> Unit, 
         text = {
             Loader(Unit, { api.getJson("/api/kopia/discover") }) { list, _ ->
                 Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (list.arr.isEmpty()) Text("Keine gefunden. Gesucht in /root/.config/kopia, /home/*/.config/kopia und /etc/servercontrol/kopia.")
+                    if (list.arr.isEmpty()) Text("Keine gefunden. Gesucht in /root/.config/kopia*, /home/*/.config/kopia* und /etc/servercontrol/kopia.")
                     list.arr.forEach { f ->
                         val cf = f["configFile"].str
                         Column {
