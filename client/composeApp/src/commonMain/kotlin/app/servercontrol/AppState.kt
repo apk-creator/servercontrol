@@ -9,12 +9,9 @@ import app.servercontrol.data.ProfileVault
 import app.servercontrol.data.ServerProfile
 import app.servercontrol.net.ApiClient
 import app.servercontrol.net.ConnectionManager
-import app.servercontrol.net.Route
 import app.servercontrol.terminal.TerminalSession
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.buildJsonObject
@@ -37,12 +34,10 @@ class Session(
     var profile: ServerProfile,
     var api: ApiClient,
     val modules: Map<String, Boolean>,
-    val route: Route?,
 )
 
 class AppState(
     private val store: SecureStore,
-    val vpn: VpnController,
     private val scope: CoroutineScope,
 ) {
     var vault by mutableStateOf(ProfileVault())
@@ -55,8 +50,6 @@ class AppState(
     var error by mutableStateOf<String?>(null)
     /** Fingerprint waiting for user confirmation (TOFU dialog) */
     var pendingCert by mutableStateOf<Pair<String, CompletableDeferred<Boolean>>?>(null)
-    var paused by mutableStateOf(false)
-        private set
 
     /** SSH terminal – kept while switching sections */
     var terminal by mutableStateOf<TerminalSession?>(null)
@@ -74,9 +67,7 @@ class AppState(
         saveProfile(p)
     }
 
-    private val conn = ConnectionManager(vpn)
-    private var pauseJob: Job? = null
-    private var savedToken: String? = null
+    private val conn = ConnectionManager()
 
     suspend fun loadVault() {
         val plain = store.load() ?: return
@@ -120,14 +111,14 @@ class AppState(
             val resp = AppJson.decodeFromString<LoginResponse>(api.raw(io.ktor.http.HttpMethod.Post, "/api/login", body))
             api.token = resp.token
             api.onUnauthorized = { scope.launch { expire() } }
-            session = Session(prof, api, resp.modules, conn.route)
+            session = Session(prof, api, resp.modules)
             vault = vault.copy(lastProfileId = prof.id)
             persist()
             section = Section.OVERVIEW
             screen = Screen.Main
         } catch (e: Throwable) {
             error = e.message ?: e.toString()
-            conn.close(profile)
+            conn.close()
         } finally {
             busy = null
         }
@@ -137,7 +128,7 @@ class AppState(
         val s = session ?: return
         closeTerminal()
         session = null
-        conn.close(s.profile)
+        conn.close()
         error = "Sitzung abgelaufen – bitte erneut anmelden."
         screen = Screen.Login(s.profile)
     }
@@ -147,58 +138,16 @@ class AppState(
         closeTerminal()
         runCatching { s.api.postRaw("/api/logout") }
         session = null
-        conn.close(s.profile)
+        conn.close()
         screen = Screen.Login(s.profile)
     }
 
-    // ------------- app lifecycle (VPN only while the app is used) -------------
-
-    /** App went to background / window minimised: after a grace period drop the tunnel. */
-    fun onBackground(graceMs: Long = 60_000) {
-        if (session == null) return
-        pauseJob?.cancel()
-        pauseJob = scope.launch {
-            delay(graceMs)
-            val s = session ?: return@launch
-            savedToken = s.api.token
-            closeTerminal()
-            paused = true
-            conn.close(s.profile) // switches the tunnel off if we started it
-        }
-    }
-
-    /** App back in foreground: reconnect (tunnel on again if needed) and reuse the session token. */
-    fun onForeground() {
-        pauseJob?.cancel()
-        pauseJob = null
-        if (!paused) return
-        val s = session ?: run { paused = false; return }
-        scope.launch {
-            try {
-                conn.status = { busy = it }
-                busy = "Verbinde erneut …"
-                val (api, _) = conn.connect(s.profile) { false }
-                api.token = savedToken
-                api.onUnauthorized = { scope.launch { expire() } }
-                session = Session(s.profile, api, s.modules, conn.route)
-                paused = false
-            } catch (e: Throwable) {
-                session = null
-                paused = false
-                error = e.message
-                screen = Screen.Login(s.profile)
-            } finally {
-                busy = null
-            }
-        }
-    }
-
-    /** App is closing: log out and switch the tunnel off. */
+    /** App is closing: log out. */
     suspend fun shutdown() {
         closeTerminal()
         val s = session ?: return
         runCatching { s.api.postRaw("/api/logout") }
-        conn.close(s.profile)
+        conn.close()
         session = null
     }
 }

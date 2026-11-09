@@ -11,7 +11,7 @@ install -d -m 0700 /etc/servercontrol
 install -m 0644 "$(dirname "$0")/servercontrol-agent.service" /etc/systemd/system/servercontrol-agent.service
 
 # Optional helpers used by the agent
-apt-get install -y --no-install-recommends smartmontools wireguard-tools >/dev/null || true
+apt-get install -y --no-install-recommends smartmontools >/dev/null || true
 
 if [ ! -f /etc/servercontrol/agent.json ]; then
   /usr/local/bin/servercontrol-agent -init

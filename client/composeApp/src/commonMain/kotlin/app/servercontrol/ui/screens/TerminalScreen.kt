@@ -170,8 +170,7 @@ private fun SshConnectForm(state: AppState, session: Session) {
                     supportingText = { Text("Wird verschlüsselt im Profil gespeichert. Das Feld „Passwort“ dient dann als Passphrase.") },
                 )
             }
-            Text(if (useKey) "Benutzer und Schlüssel-Passphrase (KeePass):" else "Benutzer und Passwort (KeePass-Autofill / Auto-Type):",
-                style = MaterialTheme.typography.bodySmall)
+            if (useKey) Text("Das Passwortfeld dient als Passphrase des Schlüssels.", style = MaterialTheme.typography.bodySmall)
             CredentialFields(user, { user = it }, password, { password = it }, onSubmit = { connect() })
             Button(onClick = { connect() }, enabled = !busy && user.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("Verbinden") }
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())

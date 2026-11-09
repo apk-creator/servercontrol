@@ -42,7 +42,6 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 import java.security.cert.CertificateException
 import java.security.cert.X509Certificate
-import java.util.concurrent.TimeUnit
 import javax.crypto.AEADBadTagException
 import javax.crypto.Cipher
 import javax.crypto.SecretKeyFactory
@@ -107,68 +106,6 @@ class DesktopSecureStore(private val passphrase: CharArray) : SecureStore {
     }
 }
 
-// ---------------- WireGuard via configurable commands ----------------
-
-class DesktopVpn : VpnController {
-    private val defaultUp: String
-    private val defaultDown: String
-
-    init {
-        if (isWindows) {
-            val wg = "\"C:\\Program Files\\WireGuard\\wireguard.exe\""
-            defaultUp = "$wg /installtunnelservice \"C:\\Program Files\\WireGuard\\Data\\Configurations\\{tunnel}.conf.dpapi\""
-            defaultDown = "$wg /uninstalltunnelservice {tunnel}"
-        } else if (osName.contains("linux")) {
-            defaultUp = "nmcli connection up {tunnel}"
-            defaultDown = "nmcli connection down {tunnel}"
-        } else {
-            defaultUp = ""
-            defaultDown = ""
-        }
-    }
-
-    override val description = when {
-        isWindows -> "Tunnelname aus der WireGuard-App. Windows: ServerControl muss dafür als Administrator laufen (oder eigene Befehle eintragen)."
-        osName.contains("linux") -> "NetworkManager-Verbindungsname (nmcli connection import type wireguard file wg0.conf)."
-        else -> "Eigene Befehle unten eintragen."
-    }
-
-    override fun isAvailable(tunnel: String, upCmd: String, downCmd: String) =
-        tunnel.isNotBlank() && (upCmd.isNotBlank() || defaultUp.isNotBlank())
-
-    private suspend fun exec(template: String, tunnel: String): Result<Unit> = withContext(Dispatchers.IO) {
-        runCatching {
-            require(tunnel.matches(Regex("^[A-Za-z0-9_.=+-]{1,32}$"))) { "Ungültiger Tunnelname" }
-            val args = tokenize(template.replace("{tunnel}", tunnel))
-            require(args.isNotEmpty()) { "Kein Befehl konfiguriert" }
-            val p = ProcessBuilder(args).redirectErrorStream(true).start()
-            if (!p.waitFor(30, TimeUnit.SECONDS)) { p.destroyForcibly(); error("Zeitüberschreitung") }
-            val out = p.inputStream.bufferedReader().readText()
-            if (p.exitValue() != 0) error("Exit ${p.exitValue()}: ${out.take(400)}")
-        }
-    }
-
-    override suspend fun up(tunnel: String, upCmd: String) = exec(upCmd.ifBlank { defaultUp }, tunnel)
-    override suspend fun down(tunnel: String, downCmd: String) = exec(downCmd.ifBlank { defaultDown }, tunnel)
-}
-
-/** Splits a command line, honouring double quotes. */
-fun tokenize(cmd: String): List<String> {
-    val out = mutableListOf<String>()
-    val cur = StringBuilder()
-    var quoted = false
-    var has = false
-    for (ch in cmd) {
-        when {
-            ch == '"' -> { quoted = !quoted; has = true }
-            ch.isWhitespace() && !quoted -> { if (has) { out += cur.toString(); cur.clear(); has = false } }
-            else -> { cur.append(ch); has = true }
-        }
-    }
-    if (has) out += cur.toString()
-    return out
-}
-
 // ---------------- pinned TLS ----------------
 
 private fun sha256Fingerprint(cert: X509Certificate): String =
@@ -201,7 +138,7 @@ actual fun createHttpClient(pinnedFingerprint: String, onCertificate: (String) -
     }
 }
 
-// ---------------- credentials (KeePassXC Auto-Type: {USERNAME}{TAB}{PASSWORD}{ENTER}) ----------------
+// ---------------- credentials (Tab moves to the next field, Enter submits) ----------------
 
 @Composable
 actual fun CredentialFields(

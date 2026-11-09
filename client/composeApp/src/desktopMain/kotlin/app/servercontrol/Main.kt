@@ -41,12 +41,10 @@ import kotlinx.coroutines.withTimeoutOrNull
 
 fun main() = application {
     val scope = remember { CoroutineScope(SupervisorJob() + Dispatchers.Main) }
-    val vpn = remember { DesktopVpn() }
     var state by remember { mutableStateOf<AppState?>(null) }
     val windowState = rememberWindowState(size = DpSize(1180.dp, 800.dp))
 
     val s = state
-    // Window title is what KeePassXC Auto-Type matches on.
     val title = when (val scr = s?.screen) {
         null -> "ServerControl – Entsperren"
         is Screen.Login -> "ServerControl – Login ${scr.profile.name}"
@@ -61,17 +59,12 @@ fun main() = application {
         title = title,
         state = windowState,
     ) {
-        // Minimised for 5 minutes → session paused and VPN off (if the app switched it on).
-        LaunchedEffect(windowState.isMinimized, s) {
-            if (s == null) return@LaunchedEffect
-            if (windowState.isMinimized) s.onBackground(5 * 60_000) else s.onForeground()
-        }
         if (s == null) {
             UnlockScreen { pass ->
                 val store = DesktopSecureStore(pass)
                 // throws WrongPassphraseException; on first run create the (empty) vault right away
                 if (store.load() == null) store.save("{\"profiles\":[]}")
-                state = AppState(store, vpn, scope)
+                state = AppState(store, scope)
             }
         } else {
             App(s)
@@ -120,8 +113,8 @@ fun UnlockScreen(onUnlock: suspend (CharArray) -> Unit) {
                 Column(Modifier.widthIn(max = 420.dp).padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("ServerControl", style = MaterialTheme.typography.headlineMedium)
                     Text(
-                        if (firstRun) "Lege ein Master-Passwort fest. Damit werden die Server-Adressen auf diesem Rechner verschlüsselt (am besten in KeePass speichern)."
-                        else "Master-Passwort eingeben (KeePassXC Auto-Type möglich).",
+                        if (firstRun) "Lege ein Master-Passwort fest. Damit werden die Server-Adressen auf diesem Rechner verschlüsselt."
+                        else "Master-Passwort eingeben.",
                     )
                     PasswordInput(pw, { pw = it }, "Master-Passwort", Modifier.fillMaxWidth().focusRequester(focus).then(enter))
                     if (firstRun) PasswordInput(pw2, { pw2 = it }, "Wiederholen", Modifier.fillMaxWidth().then(enter))
