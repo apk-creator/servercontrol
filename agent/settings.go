@@ -201,7 +201,7 @@ func (s *Server) handleKopiaDiscover(w http.ResponseWriter, r *http.Request) {
 		known[k.ConfigFile] = k.ID
 	}
 	var files []string
-	for _, pattern := range []string{"/root/.config/kopia/*.config", filepath.Join(s.kopiaDir(), "*.config"), "/home/*/.config/kopia/*.config"} {
+	for _, pattern := range []string{"/root/.config/kopia*/*.config", filepath.Join(s.kopiaDir(), "*.config"), "/home/*/.config/kopia*/*.config"} {
 		m, _ := filepath.Glob(pattern)
 		files = append(files, m...)
 	}

@@ -12,7 +12,6 @@ RestartSec=5
 User=root
 UMask=0077
 NoNewPrivileges=false
-ProtectHome=read-only
 PrivateTmp=true
 
 [Install]

@@ -18,10 +18,12 @@ if [ ! -f /etc/servercontrol/agent.json ]; then
 fi
 
 systemctl daemon-reload
-systemctl enable --now servercontrol-agent
+systemctl enable servercontrol-agent
+systemctl restart servercontrol-agent   # also picks up a new binary on upgrades
 echo
 echo "Agent läuft. Fingerprint zum Vergleich in der App:"
 /usr/local/bin/servercontrol-agent -fingerprint
 echo
-echo "Nächste Schritte: /etc/servercontrol/agent.json anpassen (listen, kopia, nextcloud, immich),"
-echo "dann: systemctl restart servercontrol-agent"
+echo "Version: $(/usr/local/bin/servercontrol-agent -version)"
+echo "Hinweis: Port 8443 muss in der Firewall für das LAN offen sein, z. B. in nftables:"
+echo "  ip saddr 192.168.1.0/24 tcp dport 8443 accept"
