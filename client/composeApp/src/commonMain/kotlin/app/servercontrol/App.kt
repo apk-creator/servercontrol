@@ -240,6 +240,7 @@ fun LoginScreen(state: AppState, profile: ServerProfile) {
 fun Section.icon(): ImageVector = when (this) {
     Section.OVERVIEW -> Icons.Default.Dashboard
     Section.TERMINAL -> Icons.Default.Terminal
+    Section.SSH_KEYS -> Icons.Default.Key
     Section.AGENT -> Icons.Default.Settings
     Section.SERVICES -> Icons.Default.SettingsApplications
     Section.CONTAINERS -> Icons.Default.ViewInAr
@@ -260,27 +261,14 @@ fun Section.icon(): ImageVector = when (this) {
 @Composable
 fun MainScreen(state: AppState) {
     val session = state.session ?: return
-    val sections = Section.entries.filter { it.module == null || session.modules[it.module] == true }
+    val sections = state.orderedSections().filter { it.module == null || session.modules[it.module] == true }
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
 
     BoxWithConstraints {
         val wide = maxWidth > 840.dp
         val nav: @Composable () -> Unit = {
-            ModalDrawerSheet(Modifier.widthIn(max = 280.dp)) {
-                Column(Modifier.verticalScroll(rememberScrollState())) {
-                    Text(session.profile.name, Modifier.padding(16.dp), style = MaterialTheme.typography.titleMedium)
-                    sections.forEach { s ->
-                        NavigationDrawerItem(
-                            label = { Text(s.title) },
-                            icon = { Icon(s.icon(), null) },
-                            selected = state.section == s,
-                            onClick = { state.section = s; scope.launch { drawer.close() } },
-                            modifier = Modifier.padding(horizontal = 12.dp),
-                        )
-                    }
-                }
-            }
+            SideMenu(state, sections) { s -> state.section = s; scope.launch { drawer.close() } }
         }
         val content: @Composable () -> Unit = {
             Scaffold(topBar = {
@@ -326,6 +314,7 @@ fun SectionContent(state: AppState, session: Session) {
     when (state.section) {
         Section.OVERVIEW -> OverviewScreen(api) { state.section = it }
         Section.TERMINAL -> TerminalScreen(state, session)
+        Section.SSH_KEYS -> SshKeysScreen(state, session)
         Section.AGENT -> AgentScreen(api)
         Section.SERVICES -> ServicesScreen(api)
         Section.CONTAINERS -> ContainersScreen(api)

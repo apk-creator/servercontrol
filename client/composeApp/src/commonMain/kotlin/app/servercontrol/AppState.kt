@@ -24,17 +24,20 @@ sealed interface Screen {
 }
 
 enum class Section(val title: String, val module: String? = null) {
-    OVERVIEW("Übersicht"), TERMINAL("Terminal"), SERVICES("Dienste"), CONTAINERS("Container"), LOGS("Protokolle"),
+    OVERVIEW("Übersicht"), TERMINAL("Terminal"), SSH_KEYS("SSH-Schlüssel"), SERVICES("Dienste"), CONTAINERS("Container"), LOGS("Protokolle"),
     STORAGE("Speicher"), NETWORK("Netzwerk"), PROCESSES("Prozesse"), UPDATES("Updates"),
     ACCOUNTS("Konten"), KOPIA("Kopia"), NEXTCLOUD("Nextcloud"), IMMICH("Immich"),
-    JOBS("Aufgaben"), SHELL("Befehl", "shell"), AGENT("Agent & Einstellungen"),
+    JOBS("Aufgaben"), SHELL("Befehl", "shell"), AGENT("Agent"),
 }
 
 class Session(
-    var profile: ServerProfile,
+    profile: ServerProfile,
     var api: ApiClient,
     val modules: Map<String, Boolean>,
-)
+) {
+    /** observable, so screens update when e.g. an SSH key is generated */
+    var profile by mutableStateOf(profile)
+}
 
 class AppState(
     private val store: SecureStore,
@@ -50,6 +53,18 @@ class AppState(
     var error by mutableStateOf<String?>(null)
     /** Fingerprint waiting for user confirmation (TOFU dialog) */
     var pendingCert by mutableStateOf<Pair<String, CompletableDeferred<Boolean>>?>(null)
+
+    /** Side menu in the user's order (drag & drop); new sections are appended. */
+    fun orderedSections(): List<Section> {
+        val byName = Section.entries.associateBy { it.name }
+        val stored = vault.sectionOrder.mapNotNull { byName[it] }
+        return stored + Section.entries.filter { it !in stored }
+    }
+
+    fun setSectionOrder(order: List<Section>) = scope.launch {
+        vault = vault.copy(sectionOrder = order.map { it.name })
+        persist()
+    }
 
     /** SSH terminal – kept while switching sections */
     var terminal by mutableStateOf<TerminalSession?>(null)

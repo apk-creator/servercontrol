@@ -44,7 +44,7 @@ Nextcloud, Immich und Kopia lassen sich komplett in der App einrichten (Bereiche
 
 ### Agent aktualisieren
 
-*Agent & Einstellungen → Nach Updates suchen → Jetzt installieren.* Der Agent lädt `servercontrol-agent.tar.gz` aus dem neuesten Release, prüft die neue Datei, ersetzt sich selbst (alte Version bleibt als `.bak`) und startet neu. Für dieses private Repository braucht der Server dafür ein GitHub-Token: *github.com → Settings → Developer settings → Fine-grained tokens*, nur Repository `servercontrol`, Berechtigung **Contents: Read-only**. Alternativ *Datei hochladen …* mit dem Archiv aus dem Release.
+*Agent → Nach Updates suchen → Jetzt installieren.* Der Agent lädt `servercontrol-agent.tar.gz` aus dem neuesten Release, prüft die neue Datei, ersetzt sich selbst (alte Version bleibt als `.bak`) und startet neu. Für dieses private Repository braucht der Server dafür ein GitHub-Token: *github.com → Settings → Developer settings → Fine-grained tokens*, nur Repository `servercontrol`, Berechtigung **Contents: Read-only**. Alternativ *Datei hochladen …* mit dem Archiv aus dem Release.
 
 Die allererste Umstellung von 1.0.0 auf eine Version mit Update-Funktion geht noch manuell: neues Archiv entpacken und `sudo sh install.sh servercontrol-agent-linux-amd64` erneut ausführen (die Konfiguration bleibt erhalten).
 
@@ -68,9 +68,20 @@ Bereich *Terminal*: Host ist die Adresse des Agenten, Port und Benutzer werden i
 - **Desktop:** eigener Emulator; mit der Maus markieren, Strg+Umschalt+C / Strg+Umschalt+V.
 - **Einfügen:** mehrzeiliger Text landet komplett in der Eingabezeile und wird erst mit Enter ausgeführt.
 - **Hintergrund (Android):** solange ein Terminal verbunden ist, hält ein Dienst die Verbindung offen; in der Benachrichtigungsleiste steht „Verbunden“ mit `>_`. *Trennen* direkt in der Benachrichtigung.
+- Das Seitenmenü lässt sich umsortieren: Eintrag lange drücken und an die gewünschte Stelle ziehen.
 - Unter der Ausgabe eine Leiste mit Strg, Alt, Esc, Tab, Pfeiltasten usw.; Schriftgröße, Einfügen und Kopieren oben rechts.
 
-## 5. Passwörter
+## 5. SSH-Schlüssel
+
+Bereich *SSH-Schlüssel* (Erzeugung wie bei ConnectBot, Ed25519 empfohlen, alternativ ECDSA oder RSA):
+
+1. *Schlüssel erzeugen* – der private Schlüssel bleibt verschlüsselt in der App, das Terminal meldet sich danach automatisch damit an.
+2. *Auf dem Server eintragen* – der Agent schreibt den öffentlichen Schlüssel in `~<benutzer>/.ssh/authorized_keys` (richtige Rechte, vorherige Version als `authorized_keys.servercontrol-backup`).
+3. Unter *Eingetragene Schlüssel* lassen sich Schlüssel anderer Geräte (z. B. PC) hinzufügen oder austragen.
+
+Für jedes Gerät einen eigenen Schlüssel verwenden. Die Passwort-Anmeldung erst abschalten, wenn sich alle Geräte per Schlüssel anmelden.
+
+## 6. Passwörter
 
 Die App speichert keine Passwörter. Auf Android sind alle Benutzer- und Passwortfelder native Autofill-Felder; am Desktop springt Tab ins nächste Feld und Enter meldet an. Passwortfelder sind verdeckt und lassen sich mit dem Augen-Symbol einblenden. Das Master-Passwort der Desktop-App verschlüsselt die gespeicherten Profile.
 

@@ -73,3 +73,19 @@ expect val ioDispatcher: kotlinx.coroutines.CoroutineDispatcher
 /** Text of the last crash (Android), shown once on the next start. */
 expect fun readCrashReport(): String?
 expect fun clearCrashReport()
+
+// ---------------- SSH key generation (modelled on ConnectBot's GeneratePubkey) ----------------
+
+enum class SshKeyAlgo(val label: String) { ED25519("Ed25519"), ECDSA("ECDSA"), RSA("RSA") }
+
+class GeneratedSshKey(
+    /** OpenSSH private key ("-----BEGIN OPENSSH PRIVATE KEY-----"), unencrypted – stored in the encrypted vault */
+    val privateKey: String,
+    /** authorized_keys line: "<type> <base64> <comment>" */
+    val publicKey: String,
+    /** "SHA256:…" like ssh-keygen -l */
+    val fingerprint: String,
+)
+
+/** [bits]: RSA 2048–8192, ECDSA 256/384/521, ignored for Ed25519. */
+expect suspend fun generateSshKey(algo: SshKeyAlgo, bits: Int, comment: String): GeneratedSshKey

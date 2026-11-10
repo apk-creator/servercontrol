@@ -133,7 +133,15 @@ private fun SshConnectForm(state: AppState, session: Session) {
                     state.updateSessionProfile(session.profile.copy(sshHostKey = e.fingerprint, sshHostKeyType = e.keyType))
                 }
                 // remember user/port/key (never the password)
-                val np = session.profile.copy(sshUser = user.trim(), sshPort = p, sshPrivateKey = if (useKey) key.trim() else "")
+                val cur = session.profile
+                val keyChanged = useKey && key.trim() != cur.sshPrivateKey.trim()
+                val np = cur.copy(
+                    sshUser = user.trim(), sshPort = p,
+                    // a password login never removes a stored key; a pasted different key replaces the generated one
+                    sshPrivateKey = if (useKey) key.trim() + "\n" else cur.sshPrivateKey,
+                    sshPublicKey = if (keyChanged) "" else cur.sshPublicKey,
+                    sshKeyFingerprint = if (keyChanged) "" else cur.sshKeyFingerprint,
+                )
                 if (np != session.profile) state.updateSessionProfile(np)
                 password = ""
             } catch (e: Throwable) {
