@@ -8,8 +8,16 @@ plugins {
     id("com.android.application")
 }
 
-val appVersion = "1.4.0"
+val appVersion = "1.5.0"
 val ktor = "3.1.3"
+
+// APP_VERSION constant for the in-app updater
+val versionDir = layout.buildDirectory.dir("generated/version/kotlin").get().asFile
+File(versionDir, "app/servercontrol/AppVersion.kt").apply {
+    parentFile.mkdirs()
+    val text = "package app.servercontrol\n\n/** generated from build.gradle.kts */\nconst val APP_VERSION = \"$appVersion\"\n"
+    if (!exists() || readText() != text) writeText(text)
+}
 
 kotlin {
     androidTarget()
@@ -17,6 +25,9 @@ kotlin {
     jvmToolchain(17)
 
     sourceSets {
+        commonMain {
+            kotlin.srcDir(versionDir)
+        }
         commonMain.dependencies {
             implementation(compose.runtime)
             implementation(compose.foundation)

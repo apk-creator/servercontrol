@@ -230,3 +230,75 @@ func handleSSHKeyRemove(w http.ResponseWriter, r *http.Request) {
 	logf("ssh key removed for %s: %s", u.Username, req.Fingerprint)
 	writeJSON(w, 200, map[string]any{"ok": true, "message": "Schlüssel entfernt"})
 }
+
+// ---------------- password login for SSH ----------------
+
+const sshdDropIn = "/etc/ssh/sshd_config.d/00-servercontrol.conf"
+
+// POST /api/ssh/password-auth {enabled, user}
+// Disabling is only allowed if the given user already has at least one key in authorized_keys.
+// sshd uses the first value it reads; the drop-in is read before the main config (Debian default),
+// "00-" makes it win against other drop-ins.
+func handleSSHPasswordAuth(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Enabled bool   `json:"enabled"`
+		User    string `json:"user"`
+	}
+	if err := readJSON(r, &req); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	if !req.Enabled {
+		u, err := lookupUser(req.User)
+		if err != nil {
+			writeErr(w, 404, "Benutzer nicht gefunden")
+			return
+		}
+		lines, _ := readAuthKeys(u)
+		n := 0
+		for _, l := range lines {
+			if _, err := parseKeyLine(l); err == nil {
+				n++
+			}
+		}
+		if n == 0 {
+			writeErr(w, 409, "Für "+u.Username+" ist noch kein Schlüssel eingetragen – Passwort-Anmeldung bleibt an")
+			return
+		}
+	}
+	old, oldErr := os.ReadFile(sshdDropIn)
+	if req.Enabled {
+		_ = os.Remove(sshdDropIn)
+	} else {
+		content := "# managed by ServerControl\nPasswordAuthentication no\nKbdInteractiveAuthentication no\n"
+		if err := os.WriteFile(sshdDropIn, []byte(content), 0o644); err != nil {
+			writeErr(w, 500, err.Error())
+			return
+		}
+	}
+	restore := func() {
+		if oldErr == nil {
+			_ = os.WriteFile(sshdDropIn, old, 0o644)
+		} else {
+			_ = os.Remove(sshdDropIn)
+		}
+	}
+	if t := run(r.Context(), 15*time.Second, nil, "sshd", "-t"); t.ExitCode != 0 {
+		restore()
+		writeErr(w, 500, "sshd-Konfiguration ungültig, nichts geändert: "+strings.TrimSpace(t.Stderr))
+		return
+	}
+	if rl := run(r.Context(), 30*time.Second, nil, "systemctl", "reload-or-restart", "ssh.service"); rl.ExitCode != 0 {
+		restore()
+		_ = run(r.Context(), 30*time.Second, nil, "systemctl", "reload-or-restart", "ssh.service")
+		writeErr(w, 500, "SSH-Dienst konnte nicht neu geladen werden: "+strings.TrimSpace(rl.Stderr))
+		return
+	}
+	now := passwordAuthStatus(r)
+	logf("ssh password authentication set to %v (sshd now: %s)", req.Enabled, now)
+	msg := "Passwort-Anmeldung per SSH ist jetzt " + map[bool]string{true: "an", false: "aus"}[now == "yes"] + "."
+	if (now == "yes") != req.Enabled {
+		msg += " Achtung: Eine andere Einstellung in /etc/ssh/sshd_config hat Vorrang – bitte prüfen."
+	}
+	writeJSON(w, 200, map[string]any{"ok": true, "passwordAuthentication": now, "message": msg})
+}

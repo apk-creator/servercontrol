@@ -22,7 +22,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.servercontrol.Bold
 import app.servercontrol.ButtonRow
+import app.servercontrol.APP_VERSION
 import app.servercontrol.SecretField
+import app.servercontrol.appUpdateAssetPattern
+import app.servercontrol.installAppUpdate
 import app.servercontrol.SmallButton
 import app.servercontrol.data.AppJson
 import app.servercontrol.net.ApiClient
@@ -165,7 +168,8 @@ fun AgentScreen(api: ApiClient) {
         var token by remember(cfg) { mutableStateOf("") }
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
             SectionCard("Agent") {
-                KeyValue("Version", cfg["version"].str)
+                KeyValue("Agent-Version", cfg["version"].str)
+                KeyValue("App-Version", APP_VERSION)
                 KeyValue("Nextcloud", if (cfg["nextcloud"]["enabled"].bool == true) "verbunden" else "nicht eingerichtet")
                 KeyValue("Immich", if (cfg["immich"]["enabled"].bool == true) "verbunden" else "nicht eingerichtet")
                 KeyValue("Kopia-Repos", cfg["kopiaCount"].str)
@@ -214,6 +218,7 @@ fun AgentScreen(api: ApiClient) {
                     }
                 }
             }
+            AppUpdateCard(api, check)
             SectionCard("Update-Quelle") {
                 Text("Für ein privates Repository braucht der Server ein GitHub-Token mit Lesezugriff (Fine-grained Token: nur dieses Repository, Berechtigung „Contents: Read-only“).", fontSize = 13.sp)
                 OutlinedTextField(repo, { repo = it.trim() }, Modifier.fillMaxWidth(), label = { Text("Repository (owner/name)") }, singleLine = true)
@@ -233,6 +238,61 @@ fun AgentScreen(api: ApiClient) {
     }
     ConfirmDialog(confirm) { confirm = null }
     ActionResultDialog(host, api)
+}
+
+/** Update of the app itself: the package is downloaded through the agent (which holds the GitHub token). */
+@Composable
+private fun AppUpdateCard(api: ApiClient, check: JsonElement?) {
+    val pattern = appUpdateAssetPattern ?: return
+    val scope = rememberCoroutineScope()
+    var progress by remember { mutableStateOf<Pair<Long, Long>?>(null) }
+    var message by remember { mutableStateOf<Pair<Boolean, String>?>(null) }
+    SectionCard("App aktualisieren") {
+        KeyValue("Installiert", APP_VERSION)
+        if (check == null) {
+            Text("Oben „Nach Updates suchen“ tippen.", fontSize = 13.sp)
+            return@SectionCard
+        }
+        val latest = check["latest"].str
+        val asset = check["assets"].arr.map { it["name"].str }.firstOrNull { pattern.matches(it) }
+        if (latest.isNotBlank()) KeyValue("Neuestes Release", latest)
+        val newer = latest.isNotBlank() && compareVersions(latest, APP_VERSION) > 0
+        when {
+            latest.isBlank() -> {}
+            asset == null -> Text("Im Release ist kein Paket für diese Plattform.", color = StatusWarn, fontSize = 13.sp)
+            !newer -> Text("Die App ist aktuell.", color = StatusOk)
+            else -> Button(enabled = progress == null, onClick = {
+                message = null
+                progress = 0L to -1L
+                scope.launch {
+                    message = try {
+                        true to installAppUpdate(api, asset) { done, total -> progress = done to total }
+                    } catch (e: Throwable) {
+                        false to "Update fehlgeschlagen: ${e.message ?: e}"
+                    }
+                    progress = null
+                }
+            }) { Text("App auf $latest aktualisieren") }
+        }
+        progress?.let { (done, total) ->
+            if (total > 0) LinearProgressIndicator(progress = { (done.toFloat() / total).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
+            else LinearProgressIndicator(Modifier.fillMaxWidth())
+            Text("${formatBytes(done)}${if (total > 0) " von ${formatBytes(total)}" else ""}", fontSize = 12.sp)
+        }
+        message?.let { (ok, m) -> Text(m, color = if (ok) StatusOk else StatusBad, fontSize = 13.sp) }
+    }
+}
+
+/** -1, 0, 1 for versions like 1.4.0 */
+fun compareVersions(a: String, b: String): Int {
+    val pa = a.removePrefix("v").substringBefore('-').split('.').map { it.toIntOrNull() ?: 0 }
+    val pb = b.removePrefix("v").substringBefore('-').split('.').map { it.toIntOrNull() ?: 0 }
+    for (i in 0 until maxOf(pa.size, pb.size)) {
+        val x = pa.getOrElse(i) { 0 }
+        val y = pb.getOrElse(i) { 0 }
+        if (x != y) return x.compareTo(y)
+    }
+    return 0
 }
 
 private fun updateMessage(j: JsonElement): String =

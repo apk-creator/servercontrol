@@ -119,7 +119,12 @@ func (s *Server) handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
 			hasAsset = true
 		}
 	}
+	assets := []map[string]any{}
+	for _, a := range rel.Assets {
+		assets = append(assets, map[string]any{"name": a.Name, "size": a.Size})
+	}
 	writeJSON(w, 200, map[string]any{
+		"assets":      assets,
 		"current":     version,
 		"latest":      strings.TrimPrefix(rel.TagName, "v"),
 		"newer":       compareVersions(rel.TagName, version) > 0,
@@ -285,4 +290,49 @@ func (s *Server) handleUpdateConfigSave(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+// App files the agent may hand out to the app (downloaded from the release with the server's token).
+var appAssetRe = regexp.MustCompile(`^(ServerControl\.apk|ServerControl-[0-9.]+\.msi|servercontrol_[0-9.]+-[0-9]+_amd64\.deb)$`)
+
+// GET /api/agent/release/asset?name=ServerControl.apk – streams an app package of the latest release.
+// The app needs no GitHub token of its own: it uses the agent's.
+func (s *Server) handleReleaseAsset(w http.ResponseWriter, r *http.Request) {
+	name := r.URL.Query().Get("name")
+	if !appAssetRe.MatchString(name) {
+		writeErr(w, 400, "unbekannte Datei")
+		return
+	}
+	rel, err := s.latestRelease(r.Context())
+	if err != nil {
+		writeErr(w, 502, err.Error())
+		return
+	}
+	var url string
+	var size int64
+	for _, a := range rel.Assets {
+		if a.Name == name {
+			url, size = a.URL, a.Size
+		}
+	}
+	if url == "" {
+		writeErr(w, 404, name+" ist im Release "+rel.TagName+" nicht enthalten")
+		return
+	}
+	resp, err := s.ghRequest(r.Context(), url, "application/octet-stream")
+	if err != nil {
+		writeErr(w, 502, err.Error())
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		writeErr(w, 502, fmt.Sprintf("Download fehlgeschlagen (HTTP %d)", resp.StatusCode))
+		return
+	}
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
+	w.Header().Set("X-Release-Version", strings.TrimPrefix(rel.TagName, "v"))
+	w.WriteHeader(200)
+	n, _ := io.Copy(w, io.LimitReader(resp.Body, 300<<20))
+	logf("app package %s (%s, %d bytes) sent", name, rel.TagName, n)
 }

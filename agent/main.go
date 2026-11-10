@@ -165,6 +165,8 @@ func (s *Server) routes() http.Handler {
 	priv.HandleFunc("GET /api/ssh/keys", handleSSHKeysList)
 	priv.HandleFunc("POST /api/ssh/keys", handleSSHKeyAdd)
 	priv.HandleFunc("POST /api/ssh/keys/remove", handleSSHKeyRemove)
+	priv.HandleFunc("POST /api/ssh/password-auth", handleSSHPasswordAuth)
+	priv.HandleFunc("GET /api/agent/release/asset", s.handleReleaseAsset)
 	// configuration from the app
 	priv.HandleFunc("GET /api/config", s.handleConfigGet)
 	priv.HandleFunc("POST /api/config/nextcloud/test", s.handleNcConfigTest)

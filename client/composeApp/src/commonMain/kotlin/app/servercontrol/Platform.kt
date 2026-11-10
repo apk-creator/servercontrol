@@ -89,3 +89,14 @@ class GeneratedSshKey(
 
 /** [bits]: RSA 2048–8192, ECDSA 256/384/521, ignored for Ed25519. */
 expect suspend fun generateSshKey(algo: SshKeyAlgo, bits: Int, comment: String): GeneratedSshKey
+
+// ---------------- app self-update (package comes from the release via the agent) ----------------
+
+/** Name pattern of this platform's package in a release (null = no in-app update). */
+expect val appUpdateAssetPattern: Regex?
+
+/**
+ * Downloads [assetName] through the agent and starts the platform installer.
+ * Returns a message for the user.
+ */
+expect suspend fun installAppUpdate(api: app.servercontrol.net.ApiClient, assetName: String, onProgress: (Long, Long) -> Unit): String

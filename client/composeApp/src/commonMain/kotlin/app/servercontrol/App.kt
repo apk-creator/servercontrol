@@ -264,6 +264,15 @@ fun MainScreen(state: AppState) {
     val sections = state.orderedSections().filter { it.module == null || session.modules[it.module] == true }
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    // opening the menu takes the focus away from the terminal/input fields (no cursor, no keyboard on top)
+    LaunchedEffect(drawer.targetValue) {
+        if (drawer.targetValue == DrawerValue.Open) {
+            focusManager.clearFocus(force = true)
+            keyboard?.hide()
+        }
+    }
 
     BoxWithConstraints {
         val wide = maxWidth > 840.dp
