@@ -161,6 +161,10 @@ func (s *Server) routes() http.Handler {
 	priv.HandleFunc("GET /api/kopia/discover", s.handleKopiaDiscover)
 	priv.HandleFunc("POST /api/kopia/connect", s.handleKopiaConnect)
 	priv.HandleFunc("POST /api/kopia/repos/{repo}/password", s.handleKopiaPassword)
+	// ssh authorized_keys
+	priv.HandleFunc("GET /api/ssh/keys", handleSSHKeysList)
+	priv.HandleFunc("POST /api/ssh/keys", handleSSHKeyAdd)
+	priv.HandleFunc("POST /api/ssh/keys/remove", handleSSHKeyRemove)
 	// configuration from the app
 	priv.HandleFunc("GET /api/config", s.handleConfigGet)
 	priv.HandleFunc("POST /api/config/nextcloud/test", s.handleNcConfigTest)

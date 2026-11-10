@@ -31,12 +31,17 @@ data class ServerProfile(
     val sshHostKeyType: String = "",
     /** optional private key (OpenSSH/PEM), stored encrypted like everything else in the vault */
     val sshPrivateKey: String = "",
+    /** public key line of a key generated in the app (for authorized_keys) */
+    val sshPublicKey: String = "",
+    val sshKeyFingerprint: String = "",
 )
 
 @Serializable
 data class ProfileVault(
     val profiles: List<ServerProfile> = emptyList(),
     val lastProfileId: String? = null,
+    /** order of the side menu (Section names), changed by drag & drop */
+    val sectionOrder: List<String> = emptyList(),
 )
 
 // ---------------- API DTOs ----------------

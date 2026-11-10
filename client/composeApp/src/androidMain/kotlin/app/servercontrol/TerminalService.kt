@@ -8,12 +8,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
-import android.graphics.Bitmap
-import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.Paint
-import android.graphics.RectF
-import android.graphics.Typeface
 import android.graphics.drawable.Icon
 import android.os.Build
 import android.os.IBinder
@@ -107,7 +102,6 @@ class TerminalService : Service() {
         )
         return Notification.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_terminal)
-            .setLargeIcon(promptBitmap())
             .setColor(Color.BLACK)
             .setContentTitle("Verbunden")
             .setContentText(title)
@@ -116,27 +110,6 @@ class TerminalService : Service() {
             .setContentIntent(open)
             .addAction(Notification.Action.Builder(Icon.createWithResource(this, R.drawable.ic_terminal), "Trennen", stop).build())
             .build()
-    }
-
-    /** ">_" black on a white tile for the expanded notification. */
-    private fun promptBitmap(): Bitmap {
-        val size = (48 * resources.displayMetrics.density).toInt()
-        val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-        val c = Canvas(bmp)
-        val r = size * 0.18f
-        c.drawRoundRect(RectF(0f, 0f, size.toFloat(), size.toFloat()), r, r, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE })
-        c.drawRoundRect(
-            RectF(1.5f, 1.5f, size - 1.5f, size - 1.5f), r, r,
-            Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK; style = Paint.Style.STROKE; strokeWidth = size * 0.04f },
-        )
-        val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.BLACK
-            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
-            textSize = size * 0.46f
-            textAlign = Paint.Align.CENTER
-        }
-        c.drawText(">_", size / 2f, size / 2f - (p.ascent() + p.descent()) / 2f, p)
-        return bmp
     }
 }
 
