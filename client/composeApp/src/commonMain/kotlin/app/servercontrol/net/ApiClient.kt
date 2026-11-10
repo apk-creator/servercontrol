@@ -30,16 +30,21 @@ class ApiClient(
     val baseUrl: String,
 ) {
     var token: String? = null
-    /** called on 401 so the UI can return to the login screen */
+    /** called when the session is gone and could not be renewed – the UI returns to the login screen */
     var onUnauthorized: (() -> Unit)? = null
+    /**
+     * Renews the session (remembered device). Gets the token that failed, returns a new token or null.
+     * Like a refresh token in other apps: the user does not notice an expired session.
+     */
+    var refresher: (suspend (String?) -> String?)? = null
 
-    suspend fun raw(
+    private suspend fun send(
         method: HttpMethod,
         path: String,
-        body: String? = null,
-        timeoutMs: Long = 60_000,
-        block: HttpRequestBuilder.() -> Unit = {},
-    ): String {
+        body: String?,
+        timeoutMs: Long,
+        block: HttpRequestBuilder.() -> Unit,
+    ): Pair<Int, String> {
         val resp: HttpResponse = http.request(baseUrl.trimEnd('/') + path) {
             this.method = method
             timeout { requestTimeoutMillis = timeoutMs }
@@ -50,10 +55,31 @@ class ApiClient(
             }
             block()
         }
-        val text = resp.bodyAsText()
-        if (resp.status.value == 401 && token != null) onUnauthorized?.invoke()
-        if (!resp.status.isSuccess()) {
-            throw ApiException(resp.status.value, extractError(text) ?: "HTTP ${resp.status.value}")
+        return resp.status.value to resp.bodyAsText()
+    }
+
+    suspend fun raw(
+        method: HttpMethod,
+        path: String,
+        body: String? = null,
+        timeoutMs: Long = 60_000,
+        block: HttpRequestBuilder.() -> Unit = {},
+    ): String {
+        var (status, text) = send(method, path, body, timeoutMs, block)
+        val renewable = status == 401 && token != null && path != "/api/refresh" && path != "/api/login"
+        if (renewable) {
+            val failed = token
+            val fresh = refresher?.invoke(failed)
+            if (fresh != null) {
+                token = fresh
+                val again = send(method, path, body, timeoutMs, block)
+                status = again.first
+                text = again.second
+            }
+            if (status == 401) onUnauthorized?.invoke()
+        }
+        if (status !in 200..299) {
+            throw ApiException(status, extractError(text) ?: "HTTP $status")
         }
         return text
     }
@@ -113,6 +139,13 @@ class ApiClient(
                 }
             }
         }
+    }
+
+    /** Renews the session via the remembered device; true when a new token is in place. */
+    suspend fun renew(): Boolean {
+        val fresh = refresher?.invoke(token) ?: return false
+        token = fresh
+        return true
     }
 
     suspend fun ping(timeoutMs: Long): Boolean = runCatching {

@@ -97,6 +97,7 @@ func (s *Server) routes() http.Handler {
 		var req struct {
 			User     string `json:"user"`
 			Password string `json:"password"`
+			Device   string `json:"device"` // optional: remember this app installation
 		}
 		if err := readJSON(r, &req); err != nil {
 			writeErr(w, 400, "invalid request")
@@ -109,12 +110,23 @@ func (s *Server) routes() http.Handler {
 			return
 		}
 		logf("login ok from %s", clientIP(r))
-		c := s.cfg.Get()
-		writeJSON(w, 200, map[string]any{"token": tok, "idleMinutes": c.SessionIdleMinutes,
-			"modules": map[string]bool{"nextcloud": c.Nextcloud.Enabled, "immich": c.Immich.Enabled, "shell": c.AllowShell}})
+		var devID, refresh string
+		if strings.TrimSpace(req.Device) != "" {
+			if devID, refresh, err = s.registerDevice(req.Device); err != nil {
+				logf("device registration failed: %v", err)
+			} else {
+				s.auth.bindDevice(tok, devID)
+			}
+		}
+		writeJSON(w, 200, s.loginResponse(tok, devID, refresh))
 	})
+	pub.HandleFunc("POST /api/refresh", s.handleRefresh)
 
 	priv.HandleFunc("POST /api/logout", func(w http.ResponseWriter, r *http.Request) {
+		// explicit sign-out also forgets the device (next login needs the password again)
+		if d := s.auth.sessionDevice(r); d != "" && r.URL.Query().Get("forget") == "1" {
+			s.revokeDevice(d)
+		}
 		s.auth.Logout(bearer(r))
 		writeJSON(w, 200, map[string]bool{"ok": true})
 	})
@@ -139,6 +151,9 @@ func (s *Server) routes() http.Handler {
 	priv.HandleFunc("GET /api/containers", handleContainers)
 	priv.HandleFunc("GET /api/containers/{name}/logs", handleContainerLogs)
 	priv.HandleFunc("POST /api/containers/{name}/{action}", handleContainerAction)
+	// remembered devices
+	priv.HandleFunc("GET /api/devices", s.handleDevices)
+	priv.HandleFunc("POST /api/devices/{id}/revoke", s.handleDeviceRevoke)
 	// jobs
 	priv.HandleFunc("GET /api/jobs", s.jobs.handleList)
 	priv.HandleFunc("GET /api/jobs/{id}", s.jobs.handleGet)
@@ -269,10 +284,11 @@ func doPasswd(path string) error {
 		return err
 	}
 	c.PasswordHash = h
+	c.Devices = nil // all remembered devices must sign in again
 	if err := writeConfig(path, c); err != nil {
 		return err
 	}
-	fmt.Println("Passwort gesetzt. Agent neu starten: systemctl restart servercontrol-agent")
+	fmt.Println("Passwort gesetzt, alle angemeldeten Geräte abgemeldet. Agent neu starten: systemctl restart servercontrol-agent")
 	return nil
 }
 

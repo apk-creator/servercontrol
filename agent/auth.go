@@ -56,6 +56,7 @@ func VerifyPassword(encoded, pw string) bool {
 type session struct {
 	created  time.Time
 	lastSeen time.Time
+	deviceID string // set when the session belongs to a remembered device
 }
 
 type Auth struct {
@@ -100,10 +101,10 @@ func clientIP(r *http.Request) string {
 
 var errLocked = errors.New("too many failed attempts, try again later")
 
-// Login checks credentials with a per-IP lockout (5 failures / 15 min).
-func (a *Auth) Login(r *http.Request, user, pw string) (string, error) {
-	ip := clientIP(r)
+// locked reports whether ip is currently locked out (5 failures / 15 min).
+func (a *Auth) locked(ip string) bool {
 	a.mu.Lock()
+	defer a.mu.Unlock()
 	recent := a.failures[ip][:0]
 	for _, t := range a.failures[ip] {
 		if time.Since(t) < 15*time.Minute {
@@ -111,22 +112,18 @@ func (a *Auth) Login(r *http.Request, user, pw string) (string, error) {
 		}
 	}
 	a.failures[ip] = recent
-	if len(recent) >= 5 {
-		a.mu.Unlock()
-		return "", errLocked
-	}
-	a.mu.Unlock()
+	return len(recent) >= 5
+}
 
-	c := a.cfg.Get()
-	userOK := subtle.ConstantTimeCompare([]byte(user), []byte(c.User)) == 1
-	pwOK := VerifyPassword(c.PasswordHash, pw) // always run to keep timing uniform
-	if !userOK || !pwOK {
-		a.mu.Lock()
-		a.failures[ip] = append(a.failures[ip], time.Now())
-		a.mu.Unlock()
-		time.Sleep(500 * time.Millisecond)
-		return "", errors.New("invalid credentials")
-	}
+func (a *Auth) fail(ip string) {
+	a.mu.Lock()
+	a.failures[ip] = append(a.failures[ip], time.Now())
+	a.mu.Unlock()
+	time.Sleep(500 * time.Millisecond)
+}
+
+// newSession creates a session token (optionally bound to a remembered device).
+func (a *Auth) newSession(ip, deviceID string) (string, error) {
 	tok := make([]byte, 32)
 	if _, err := rand.Read(tok); err != nil {
 		return "", err
@@ -134,9 +131,55 @@ func (a *Auth) Login(r *http.Request, user, pw string) (string, error) {
 	t := hex.EncodeToString(tok)
 	a.mu.Lock()
 	delete(a.failures, ip)
-	a.sessions[t] = &session{created: time.Now(), lastSeen: time.Now()}
+	a.sessions[t] = &session{created: time.Now(), lastSeen: time.Now(), deviceID: deviceID}
 	a.mu.Unlock()
 	return t, nil
+}
+
+// Login checks credentials with a per-IP lockout (5 failures / 15 min).
+func (a *Auth) Login(r *http.Request, user, pw string) (string, error) {
+	ip := clientIP(r)
+	if a.locked(ip) {
+		return "", errLocked
+	}
+	c := a.cfg.Get()
+	userOK := subtle.ConstantTimeCompare([]byte(user), []byte(c.User)) == 1
+	pwOK := VerifyPassword(c.PasswordHash, pw) // always run to keep timing uniform
+	if !userOK || !pwOK {
+		a.fail(ip)
+		return "", errors.New("invalid credentials")
+	}
+	return a.newSession(ip, "")
+}
+
+// bindDevice marks a session as belonging to a device.
+func (a *Auth) bindDevice(token, deviceID string) {
+	a.mu.Lock()
+	if s, ok := a.sessions[token]; ok {
+		s.deviceID = deviceID
+	}
+	a.mu.Unlock()
+}
+
+// sessionDevice returns the device of the session behind the request ("" if none).
+func (a *Auth) sessionDevice(r *http.Request) string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if s, ok := a.sessions[bearer(r)]; ok {
+		return s.deviceID
+	}
+	return ""
+}
+
+// dropDevice ends all sessions of a revoked device.
+func (a *Auth) dropDevice(deviceID string) {
+	a.mu.Lock()
+	for k, s := range a.sessions {
+		if s.deviceID == deviceID {
+			delete(a.sessions, k)
+		}
+	}
+	a.mu.Unlock()
 }
 
 func (a *Auth) Logout(token string) {

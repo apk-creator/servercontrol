@@ -8,7 +8,7 @@ plugins {
     id("com.android.application")
 }
 
-val appVersion = "1.6.0"
+val appVersion = "1.7.0"
 val ktor = "3.1.3"
 
 // APP_VERSION constant for the in-app updater

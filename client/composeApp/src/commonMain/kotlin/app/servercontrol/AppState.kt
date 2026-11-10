@@ -12,7 +12,10 @@ import app.servercontrol.net.ConnectionManager
 import app.servercontrol.terminal.TerminalSession
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -38,6 +41,16 @@ class Session(
     /** observable, so screens update when e.g. an SSH key is generated */
     var profile by mutableStateOf(profile)
 }
+
+/** Progress of an in-app update (survives leaving the Agent view and the app going to the background). */
+data class AppUpdateProgress(
+    val asset: String,
+    val done: Long = 0,
+    val total: Long = -1,
+    val running: Boolean = true,
+    val ok: Boolean = false,
+    val message: String? = null,
+)
 
 class AppState(
     private val store: SecureStore,
@@ -84,9 +97,24 @@ class AppState(
 
     private val conn = ConnectionManager()
 
+    private var autoResumed = false
+
     suspend fun loadVault() {
         val plain = store.load() ?: return
         vault = runCatching { AppJson.decodeFromString<ProfileVault>(plain) }.getOrElse { ProfileVault() }
+        // app (re)started, e.g. after Android ended the process in the background:
+        // reconnect to the last server with the remembered device
+        if (!autoResumed && session == null && screen == Screen.Profiles) {
+            autoResumed = true
+            vault.profiles.find { it.id == vault.lastProfileId && it.refreshToken.isNotEmpty() }?.let { openProfile(it) }
+        }
+    }
+
+    /** Profile tapped: sign in silently if this device is remembered, otherwise ask for the password. */
+    fun openProfile(p: ServerProfile) {
+        error = null
+        screen = Screen.Login(p)
+        if (p.refreshToken.isNotEmpty()) resume(p)
     }
 
     private suspend fun persist() = store.save(AppJson.encodeToString(vault))
@@ -110,27 +138,105 @@ class AppState(
         return d.await().also { pendingCert = null }
     }
 
+    private suspend fun connect(profile: ServerProfile): Pair<ApiClient, ServerProfile> {
+        conn.status = { busy = it }
+        busy = "Verbinde …"
+        val (api, fp) = conn.connect(profile) { confirmCert(it) }
+        var prof = profile
+        if (fp != profile.certFingerprint) {
+            prof = profile.copy(certFingerprint = fp)
+            upsert(prof)
+        }
+        return api to prof
+    }
+
+    private suspend fun startSession(api: ApiClient, prof: ServerProfile, resp: LoginResponse) {
+        api.token = resp.token
+        api.onUnauthorized = { scope.launch { expire() } }
+        val profileId = prof.id
+        api.refresher = { failed -> renewSession(api, profileId, failed) }
+        session = Session(prof, api, resp.modules)
+        vault = vault.copy(lastProfileId = prof.id)
+        persist()
+        section = Section.OVERVIEW
+        screen = Screen.Main
+    }
+
+    private val renewLock = Mutex()
+
+    /** Gets a new session token with the remembered device (null = not possible). */
+    private suspend fun renewSession(api: ApiClient, profileId: String, failed: String?): String? = renewLock.withLock {
+        // another request already renewed the session meanwhile
+        api.token?.let { if (it != failed) return@withLock it }
+        requestRefresh(api, profileId)?.token
+    }
+
+    private suspend fun requestRefresh(api: ApiClient, profileId: String): LoginResponse? {
+        val p = vault.profiles.find { it.id == profileId } ?: return null
+        if (p.refreshToken.isEmpty()) return null
+        val body = buildJsonObject { put("deviceId", p.deviceId); put("refreshToken", p.refreshToken) }.toString()
+        return try {
+            AppJson.decodeFromString<LoginResponse>(api.raw(io.ktor.http.HttpMethod.Post, "/api/refresh", body))
+        } catch (e: app.servercontrol.net.ApiException) {
+            // 401: device was removed on the server or the password was changed → password needed again
+            if (e.status == 401) forgetDevice(profileId)
+            null
+        } catch (e: Throwable) {
+            null
+        }
+    }
+
+    private suspend fun forgetDevice(profileId: String) {
+        val p = vault.profiles.find { it.id == profileId } ?: return
+        val cleared = p.copy(deviceId = "", refreshToken = "")
+        upsert(cleared)
+        if (session?.profile?.id == profileId) session?.profile = cleared
+        (screen as? Screen.Login)?.let { if (it.profile.id == profileId) screen = Screen.Login(cleared) }
+    }
+
+    /** Silent sign-in with the remembered device. */
+    private fun resume(profile: ServerProfile) = scope.launch {
+        error = null
+        try {
+            val (api, prof) = connect(profile)
+            busy = "Anmelden …"
+            val resp = requestRefresh(api, prof.id)
+            if (resp != null) {
+                startSession(api, vault.profiles.find { it.id == prof.id } ?: prof, resp)
+            } else {
+                conn.close()
+                val current = vault.profiles.find { it.id == prof.id } ?: prof
+                if (current.refreshToken.isNotEmpty()) error = "Server nicht erreichbar – bitte erneut versuchen."
+                screen = Screen.Login(current)
+            }
+        } catch (e: Throwable) {
+            error = e.message ?: e.toString()
+            conn.close()
+        } finally {
+            busy = null
+        }
+    }
+
     fun login(profile: ServerProfile, user: String, password: String) = scope.launch {
         error = null
         try {
-            conn.status = { busy = it }
-            busy = "Verbinde …"
-            val (api, fp) = conn.connect(profile) { confirmCert(it) }
-            var prof = profile
-            if (fp != profile.certFingerprint) {
-                prof = profile.copy(certFingerprint = fp)
-                upsert(prof)
-            }
+            val (api, connected) = connect(profile)
+            var prof = connected
             busy = "Anmelden …"
-            val body = buildJsonObject { put("user", user); put("password", password) }.toString()
+            val body = buildJsonObject {
+                put("user", user)
+                put("password", password)
+                put("device", deviceName) // stay signed in on this device
+            }.toString()
             val resp = AppJson.decodeFromString<LoginResponse>(api.raw(io.ktor.http.HttpMethod.Post, "/api/login", body))
-            api.token = resp.token
-            api.onUnauthorized = { scope.launch { expire() } }
-            session = Session(prof, api, resp.modules)
-            vault = vault.copy(lastProfileId = prof.id)
-            persist()
-            section = Section.OVERVIEW
-            screen = Screen.Main
+            if (resp.refreshToken.isNotEmpty()) {
+                val old = prof.deviceId
+                prof = prof.copy(deviceId = resp.deviceId, refreshToken = resp.refreshToken)
+                upsert(prof)
+                api.token = resp.token
+                if (old.isNotEmpty() && old != resp.deviceId) runCatching { api.postRaw("/api/devices/$old/revoke") }
+            }
+            startSession(api, prof, resp)
         } catch (e: Throwable) {
             error = e.message ?: e.toString()
             conn.close()
@@ -141,24 +247,63 @@ class AppState(
 
     private suspend fun expire() {
         val s = session ?: return
+        cancelAppUpdate()
         closeTerminal()
         session = null
         conn.close()
         error = "Sitzung abgelaufen – bitte erneut anmelden."
-        screen = Screen.Login(s.profile)
+        screen = Screen.Login(vault.profiles.find { it.id == s.profile.id } ?: s.profile)
     }
 
+    /** Explicit sign-out: also forgets this device, the next sign-in needs the password. */
     fun logout() = scope.launch {
         val s = session ?: return@launch
+        cancelAppUpdate()
         closeTerminal()
-        runCatching { s.api.postRaw("/api/logout") }
+        runCatching { s.api.postRaw("/api/logout?forget=1") }
         session = null
         conn.close()
-        screen = Screen.Login(s.profile)
+        forgetDevice(s.profile.id)
+        screen = Screen.Login(vault.profiles.find { it.id == s.profile.id } ?: s.profile)
+    }
+
+    // ---------------- in-app update ----------------
+
+    var appUpdate by mutableStateOf<AppUpdateProgress?>(null)
+        private set
+    private var updateJob: Job? = null
+
+    fun startAppUpdate(asset: String) {
+        if (updateJob?.isActive == true) return
+        val s = session ?: return
+        appUpdate = AppUpdateProgress(asset)
+        updateJob = scope.launch {
+            appUpdate = try {
+                val msg = installAppUpdate(s.api, s.profile.certFingerprint, asset) { done, total ->
+                    appUpdate = appUpdate?.copy(done = done, total = total)
+                }
+                appUpdate?.copy(running = false, ok = true, message = msg)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                null
+            } catch (e: Throwable) {
+                appUpdate?.copy(running = false, message = e.message ?: e.toString())
+            }
+        }
+    }
+
+    fun cancelAppUpdate() {
+        updateJob?.cancel()
+        updateJob = null
+        appUpdate = null
+    }
+
+    fun dismissAppUpdate() {
+        if (updateJob?.isActive != true) appUpdate = null
     }
 
     /** App is closing: log out. */
     suspend fun shutdown() {
+        updateJob?.cancel()
         closeTerminal()
         val s = session ?: return
         runCatching { s.api.postRaw("/api/logout") }

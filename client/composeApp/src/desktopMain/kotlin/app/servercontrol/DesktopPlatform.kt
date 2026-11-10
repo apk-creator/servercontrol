@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import java.io.File
@@ -111,7 +112,7 @@ class DesktopSecureStore(private val passphrase: CharArray) : SecureStore {
 private fun sha256Fingerprint(cert: X509Certificate): String =
     MessageDigest.getInstance("SHA-256").digest(cert.encoded).joinToString(":") { "%02X".format(it) }
 
-actual fun createHttpClient(pinnedFingerprint: String, onCertificate: (String) -> Unit): HttpClient {
+internal fun pinnedOkHttp(pinnedFingerprint: String, onCertificate: (String) -> Unit): OkHttpClient {
     val pin = pinnedFingerprint.trim().uppercase()
     val tm = object : X509TrustManager {
         override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {
@@ -128,10 +129,14 @@ actual fun createHttpClient(pinnedFingerprint: String, onCertificate: (String) -
         override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
     }
     val ssl = SSLContext.getInstance("TLS").apply { init(null, arrayOf(tm), SecureRandom()) }
-    val ok = OkHttpClient.Builder()
+    return OkHttpClient.Builder()
         .sslSocketFactory(ssl.socketFactory, tm)
         .hostnameVerifier { _, _ -> true }
         .build()
+}
+
+actual fun createHttpClient(pinnedFingerprint: String, onCertificate: (String) -> Unit): HttpClient {
+    val ok = pinnedOkHttp(pinnedFingerprint, onCertificate)
     return HttpClient(OkHttp) {
         engine { preconfigured = ok }
         app.servercontrol.net.ApiClient.configure(this)
@@ -216,13 +221,9 @@ actual val appUpdateAssetPattern: Regex? = when {
     else -> null
 }
 
-actual suspend fun installAppUpdate(api: app.servercontrol.net.ApiClient, assetName: String, onProgress: (Long, Long) -> Unit): String {
+actual suspend fun installAppUpdate(api: app.servercontrol.net.ApiClient, certFingerprint: String, assetName: String, onProgress: (Long, Long) -> Unit): String {
     val file = File(System.getProperty("java.io.tmpdir"), assetName)
-    withContext(Dispatchers.IO) {
-        file.outputStream().buffered().use { out ->
-            api.download("/api/agent/release/asset?name=$assetName", { b, n -> out.write(b, 0, n) }, onProgress)
-        }
-    }
+    fastDownload(api, certFingerprint, "/api/agent/release/asset?name=$assetName", file, onProgress)
     return if (isWindows) {
         // the installer replaces the program files, so ServerControl closes itself
         ProcessBuilder("msiexec", "/i", file.absolutePath, "/passive").start()
@@ -236,3 +237,59 @@ actual suspend fun installAppUpdate(api: app.servercontrol.net.ApiClient, assetN
         "Paket heruntergeladen (${file.absolutePath}) und an die Softwareverwaltung übergeben."
     }
 }
+
+// ---------------- fast download (app update) ----------------
+
+/** Downloads an agent path straight to [file] with large buffers; progress at most 4×/s. */
+internal suspend fun fastDownload(
+    api: app.servercontrol.net.ApiClient,
+    certFingerprint: String,
+    path: String,
+    file: File,
+    onProgress: (Long, Long) -> Unit,
+) = withContext(Dispatchers.IO) {
+    val client = pinnedOkHttp(certFingerprint, {}).newBuilder()
+        .readTimeout(120, java.util.concurrent.TimeUnit.SECONDS)
+        .callTimeout(30, java.util.concurrent.TimeUnit.MINUTES)
+        .build()
+    fun call() = client.newCall(
+        okhttp3.Request.Builder().url(api.baseUrl.trimEnd('/') + path)
+            .apply { api.token?.let { header("Authorization", "Bearer $it") } }
+            .build(),
+    ).execute()
+    var resp = call()
+    if (resp.code == 401) {
+        resp.close()
+        if (!api.renew()) throw app.servercontrol.net.ApiException(401, "Sitzung abgelaufen")
+        resp = call()
+    }
+    resp.use { r ->
+        if (!r.isSuccessful) throw app.servercontrol.net.ApiException(r.code, "Download fehlgeschlagen (HTTP ${r.code})")
+        val body = r.body ?: throw app.servercontrol.net.ApiException(r.code, "leere Antwort")
+        val total = body.contentLength()
+        val tmp = File(file.parentFile, file.name + ".part")
+        body.byteStream().use { input ->
+            tmp.outputStream().use { out ->
+                val buf = ByteArray(256 * 1024)
+                var done = 0L
+                var last = 0L
+                while (true) {
+                    kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                    val n = input.read(buf)
+                    if (n < 0) break
+                    out.write(buf, 0, n)
+                    done += n
+                    val now = System.currentTimeMillis()
+                    if (now - last >= 250) { last = now; onProgress(done, total) }
+                }
+                onProgress(done, total)
+            }
+        }
+        if (total > 0 && tmp.length() != total) throw app.servercontrol.net.ApiException(0, "Download unvollständig")
+        file.delete()
+        if (!tmp.renameTo(file)) throw app.servercontrol.net.ApiException(0, "Datei konnte nicht gespeichert werden")
+    }
+}
+
+actual val deviceName: String = runCatching { java.net.InetAddress.getLocalHost().hostName }.getOrNull()
+    ?.takeIf { it.isNotBlank() }?.let { "$it (${System.getProperty("os.name")})" } ?: System.getProperty("os.name")
