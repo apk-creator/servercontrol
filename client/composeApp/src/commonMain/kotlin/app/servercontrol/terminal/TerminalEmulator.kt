@@ -448,6 +448,20 @@ class TerminalEmulator(cols: Int, rows: Int, private val scrollbackMax: Int = 30
         version++
     }
 
+    /** true when no escape sequence / UTF-8 character is half-parsed (safe to inject local sequences) */
+    val isIdle: Boolean get() = state == State.NORMAL && utf8Need == 0
+
+    /**
+     * Local sequence that moves the cursor line to the top of the screen: the lines above go
+     * into the scrollback (CSI n S) and the cursor follows (CSI n A). Null if nothing to do or
+     * a full-screen program (alternate screen) is running.
+     */
+    fun liftSequence(): ByteArray? {
+        val n = cursorY
+        if (n <= 0 || useAlt || !isIdle) return null
+        return "\u001b[${n}S\u001b[${n}A".encodeToByteArray()
+    }
+
     /** Visible screen as plain text (for copying). */
     fun screenText(): String = screen.joinToString("\n") { it.text() }.trimEnd()
 }

@@ -161,7 +161,7 @@ private fun NcUsers(api: ApiClient, host: ActionHost, ask: (Confirm) -> Unit) {
             var quota by remember(id) { mutableStateOf("") }
             var pw by remember(id) { mutableStateOf("") }
             val body = """{"user":${jsonString(id)}}"""
-            AlertDialog(
+            AppDialog(
                 onDismissRequest = { selected = null },
                 title = { Text(id) },
                 text = {
@@ -202,7 +202,7 @@ private fun NcAddUser(host: ActionHost, onDone: () -> Unit) {
     var name by remember { mutableStateOf("") }
     var mail by remember { mutableStateOf("") }
     var group by remember { mutableStateOf("") }
-    AlertDialog(
+    AppDialog(
         onDismissRequest = onDone,
         title = { Text("Nextcloud-Benutzer anlegen") },
         text = {

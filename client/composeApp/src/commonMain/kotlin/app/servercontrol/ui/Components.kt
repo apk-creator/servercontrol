@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
@@ -126,8 +127,8 @@ fun ErrorCard(msg: String, retry: (() -> Unit)? = null) {
 
 @Composable
 fun SectionCard(title: String? = null, modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
-    Card(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Card(modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             if (title != null) Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             content()
         }
@@ -137,7 +138,7 @@ fun SectionCard(title: String? = null, modifier: Modifier = Modifier, content: @
 @Composable
 fun KeyValue(k: String, v: String) {
     Row(Modifier.fillMaxWidth()) {
-        Text(k, Modifier.width(140.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(k, Modifier.width(112.dp).padding(end = 8.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(v, Modifier.weight(1f))
     }
 }
@@ -171,7 +172,7 @@ class Confirm(val title: String, val text: String, val action: () -> Unit)
 @Composable
 fun ConfirmDialog(c: Confirm?, onDismiss: () -> Unit) {
     if (c == null) return
-    AlertDialog(
+    AppDialog(
         onDismissRequest = onDismiss,
         title = { Text(c.title) },
         text = { Text(c.text) },
@@ -235,15 +236,15 @@ fun rememberActionHost(api: () -> ApiClient): ActionHost {
 @Composable
 fun ActionResultDialog(host: ActionHost, api: ApiClient) {
     if (host.running) {
-        AlertDialog(onDismissRequest = {}, confirmButton = {}, title = { Text("Bitte warten …") },
+        AppDialog(onDismissRequest = {}, confirmButton = {}, title = { Text("Bitte warten …") },
             text = { LinearProgressIndicator(Modifier.fillMaxWidth()) })
     }
     when (val r = host.result) {
         null -> {}
-        is ActionResult.Message -> AlertDialog(
+        is ActionResult.Message -> AppDialog(
             onDismissRequest = { host.result = null },
             title = { Text(r.title, color = if (r.ok) Color.Unspecified else StatusBad) },
-            text = { Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) { MonoText(r.text) } },
+            text = { Column(Modifier.verticalScroll(rememberScrollState())) { MonoText(r.text) } },
             confirmButton = { TextButton(onClick = { host.result = null }) { Text("OK") } },
         )
         is ActionResult.JobRef -> JobDialog(api, r.id, r.title) { host.result = null }
@@ -268,7 +269,7 @@ fun JobDialog(api: ApiClient, id: String, title: String, onDismiss: () -> Unit) 
         }
     }
     val j = job
-    AlertDialog(
+    AppDialog(
         onDismissRequest = onDismiss,
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -277,7 +278,7 @@ fun JobDialog(api: ApiClient, id: String, title: String, onDismiss: () -> Unit) 
             }
         },
         text = {
-            Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState(), reverseScrolling = false)) {
+            Column(Modifier.verticalScroll(rememberScrollState(), reverseScrolling = false)) {
                 err?.let { Text(it, color = StatusBad) }
                 if (j?.finished != null) {
                     Text(
@@ -296,5 +297,53 @@ fun JobDialog(api: ApiClient, id: String, title: String, onDismiss: () -> Unit) 
 fun StatusDot(color: Color) {
     Box(Modifier.width(10.dp).heightIn(min = 10.dp, max = 10.dp).padding(0.dp)) {
         androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) { drawCircle(color) }
+    }
+}
+
+// ---------------- dialogs ----------------
+
+/**
+ * Dialog with the same parameters as Material's AlertDialog, but using the whole screen
+ * width on phones (Galaxy S24: ~384 dp) and as much height as the content needs.
+ */
+@Composable
+fun AppDialog(
+    onDismissRequest: () -> Unit,
+    confirmButton: @Composable () -> Unit,
+    modifier: Modifier = Modifier,
+    dismissButton: (@Composable () -> Unit)? = null,
+    title: (@Composable () -> Unit)? = null,
+    text: (@Composable () -> Unit)? = null,
+) {
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismissRequest,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        androidx.compose.material3.Surface(
+            modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 12.dp).widthIn(max = 640.dp),
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            tonalElevation = 6.dp,
+        ) {
+            Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 6.dp)) {
+                title?.let {
+                    androidx.compose.material3.ProvideTextStyle(MaterialTheme.typography.titleLarge) { it() }
+                    Spacer(Modifier.heightIn(min = 10.dp))
+                }
+                text?.let {
+                    Box(Modifier.weight(1f, fill = false)) {
+                        androidx.compose.material3.ProvideTextStyle(MaterialTheme.typography.bodyMedium) { it() }
+                    }
+                }
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 4.dp),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    dismissButton?.invoke()
+                    confirmButton()
+                }
+            }
+        }
     }
 }

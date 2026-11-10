@@ -167,7 +167,7 @@ private fun ImmichUsers(api: ApiClient, host: ActionHost, ask: (Confirm) -> Unit
         sel?.let { u ->
             val id = u["id"].str
             var quotaGb by remember(id) { mutableStateOf("") }
-            AlertDialog(
+            AppDialog(
                 onDismissRequest = { sel = null },
                 title = { Text(u["name"].str) },
                 text = {
@@ -195,7 +195,7 @@ private fun ImmichUsers(api: ApiClient, host: ActionHost, ask: (Confirm) -> Unit
             var mail by remember { mutableStateOf("") }
             var pw by remember { mutableStateOf("") }
             var name by remember { mutableStateOf("") }
-            AlertDialog(
+            AppDialog(
                 onDismissRequest = { adding = false },
                 title = { Text("Immich-Benutzer anlegen") },
                 text = {

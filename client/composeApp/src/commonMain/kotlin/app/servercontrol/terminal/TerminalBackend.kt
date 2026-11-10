@@ -29,6 +29,12 @@ interface TerminalBackend {
     /** Visible screen as text (desktop "copy screen"); null if the platform offers its own selection. */
     fun screenText(): String?
 
+    /** Text for the copy button: the current selection if there is one, otherwise the visible screen. */
+    fun copyText(): String
+
+    /** Empties the terminal: drops the scrollback and lets the shell redraw its prompt at the top (Ctrl+L). */
+    fun clear()
+
     /** Free native resources; the backend is unusable afterwards. */
     fun dispose()
 }

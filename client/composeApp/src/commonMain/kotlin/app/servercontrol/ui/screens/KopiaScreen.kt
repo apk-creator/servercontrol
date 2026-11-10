@@ -101,12 +101,12 @@ private fun idFromFile(path: String): String {
 
 @Composable
 private fun KopiaDiscoverDialog(api: ApiClient, onPick: (KopiaRepoDef) -> Unit, onDismiss: () -> Unit) {
-    AlertDialog(
+    AppDialog(
         onDismissRequest = onDismiss,
         title = { Text("Kopia-Konfigurationen auf dem Server") },
         text = {
             Loader(Unit, { api.getJson("/api/kopia/discover") }) { list, _ ->
-                Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (list.arr.isEmpty()) Text("Keine gefunden. Gesucht in /root/.config/kopia*, /home/*/.config/kopia* und /etc/servercontrol/kopia.")
                     list.arr.forEach { f ->
                         val cf = f["configFile"].str
@@ -140,7 +140,7 @@ private fun KopiaConnectDialog(api: ApiClient, onDone: () -> Unit) {
     var store by remember { mutableStateOf(true) }
     var sources by remember { mutableStateOf("") }
     val host = rememberActionHost { api }
-    AlertDialog(
+    AppDialog(
         onDismissRequest = onDone,
         title = { Text(if (create) "Neues Kopia-Repository" else "Mit Kopia-Repository verbinden") },
         text = {
@@ -193,7 +193,7 @@ private fun KopiaRepoEditor(api: ApiClient, initial: KopiaRepoDef, onDone: () ->
     var err by remember { mutableStateOf<String?>(null) }
     val host = rememberActionHost { api }
     val isNew = initial.id.isBlank()
-    AlertDialog(
+    AppDialog(
         onDismissRequest = onDone,
         title = { Text(if (isNew) "Kopia-Repository hinzufügen" else "Repository bearbeiten") },
         text = {
@@ -310,7 +310,7 @@ private fun KopiaRepoDetail(api: ApiClient, repo: KopiaRepo, onBack: () -> Unit)
     }
     restore?.let { s ->
         var target by remember(s.id) { mutableStateOf("/tmp/restore-${s.id.take(8)}") }
-        AlertDialog(
+        AppDialog(
             onDismissRequest = { restore = null },
             title = { Text("Snapshot ${s.id.take(12)}…") },
             text = {
