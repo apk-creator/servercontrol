@@ -19,7 +19,18 @@ private class DesktopTerminalBackend(
         if (SwingUtilities.isEventDispatchThread()) emu.feed(data) else SwingUtilities.invokeLater { emu.feed(data) }
     }
 
-    fun send(text: String) = onInput(text.encodeToByteArray())
+    fun send(text: String) {
+        // as soon as something is typed the input line jumps to the top
+        emu.liftSequence()?.let { emu.feed(it) }
+        onInput(text.encodeToByteArray())
+    }
+
+    override fun copyText(): String = emu.screenText()
+
+    override fun clear() {
+        emu.feed("\u001b[3J".encodeToByteArray())
+        onInput("\u000c".encodeToByteArray())
+    }
 
     override fun paste(text: String) {
         val t = text.replace('\n', '\r')

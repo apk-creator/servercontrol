@@ -69,6 +69,8 @@ Bereich *Terminal*: Host ist die Adresse des Agenten, Port und Benutzer werden i
 - **Android:** Das Terminal ist die Terminal-Komponente von [ConnectBot](https://github.com/connectbot/termlib) (libvterm): lange drücken markiert, Griffe mit Lupe, Menü mit Kopieren/Einfügen/Alles auswählen, Zwei-Finger-Zoom für die Schrift. Tippen in die Eingabezeile setzt den Cursor.
 - **Desktop:** eigener Emulator; mit der Maus markieren, Strg+Umschalt+C / Strg+Umschalt+V.
 - **Einfügen:** mehrzeiliger Text landet komplett in der Eingabezeile und wird erst mit Enter ausgeführt.
+- **Werkzeugleiste:** Einfügen, Kopieren (Auswahl, ohne Auswahl der sichtbare Bildschirm), Leeren (Mülleimer: Verlauf weg, Shell zeichnet die Eingabezeile oben neu), Trennen.
+- Sobald etwas eingetippt wird, springt die aktuelle Eingabezeile ganz nach oben (nicht in Vollbild-Programmen wie nano/htop).
 - **Hintergrund (Android):** solange ein Terminal verbunden ist, hält ein Dienst die Verbindung offen; in der Benachrichtigungsleiste steht „Verbunden“ mit `>_`. *Trennen* direkt in der Benachrichtigung.
 - Das Seitenmenü lässt sich umsortieren: Eintrag lange drücken und an die gewünschte Stelle ziehen.
 - Unter der Ausgabe eine Leiste mit Strg, Alt, Esc, Tab, Pfeiltasten usw.; Schriftgröße, Einfügen und Kopieren oben rechts.
@@ -97,5 +99,5 @@ Die App speichert keine Passwörter. Auf Android sind alle Benutzer- und Passwor
 
 - `agent/` – Go 1.24, nur Standardbibliothek: `cd agent && go build .`
 - `client/` – Kotlin Multiplatform + Compose Multiplatform (Android + Desktop); Android-Terminal: `org.connectbot:termlib` (Apache-2.0): `cd client && ./gradlew :composeApp:run` bzw. `:composeApp:assembleRelease`
-- CI: `.github/workflows/build.yml` baut Agent, APK, .deb und .msi; ein Tag `v*` erzeugt ein Release.
+- CI: `.github/workflows/build.yml` baut Agent, APK, .deb und .msi. **Release automatisch:** Wird auf `main` die Version in `client/composeApp/build.gradle.kts` (`appVersion`) erhöht, legt die CI nach erfolgreichem Build Tag `v<version>` und das Release mit allen Dateien selbst an. (Ein manuell erstelltes Tag `v*` funktioniert weiterhin.)
 - Signierung: Ohne Secrets wird `client/composeApp/signing/servercontrol.keystore` verwendet (privates Repo). Für einen eigenen Schlüssel die Secrets `SIGNING_KEYSTORE_BASE64`, `SIGNING_STORE_PASSWORD`, `SIGNING_KEY_ALIAS`, `SIGNING_KEY_PASSWORD` setzen (Achtung: Schlüsselwechsel erfordert Neuinstallation).

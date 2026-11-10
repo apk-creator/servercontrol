@@ -200,7 +200,7 @@ fun SshKeysScreen(state: AppState, session: Session) {
 
     if (addKey) {
         var text by remember { mutableStateOf("") }
-        AlertDialog(
+        AppDialog(
             onDismissRequest = { addKey = false },
             title = { Text("Öffentlichen Schlüssel hinzufügen") },
             text = {
@@ -217,7 +217,7 @@ fun SshKeysScreen(state: AppState, session: Session) {
     }
     if (importKey) {
         var text by remember { mutableStateOf("") }
-        AlertDialog(
+        AppDialog(
             onDismissRequest = { importKey = false },
             title = { Text("Privaten Schlüssel einfügen") },
             text = {

@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
@@ -46,9 +47,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import kotlin.math.roundToInt
 
-private val ItemHeight = 48.dp
-private val ItemGap = 2.dp
-private val ItemShape = RoundedCornerShape(24.dp)
+private val ItemHeight = 40.dp
+private val ItemGap = 1.dp
+private val ItemShape = RoundedCornerShape(20.dp)
 
 /**
  * Side menu that is only as wide as its entries need.
@@ -75,7 +76,7 @@ fun SideMenu(state: AppState, sections: List<Section>, onSelect: (Section) -> Un
                 // stay clear of the status bar / navigation bar (Android draws edge-to-edge)
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Vertical + WindowInsetsSides.Start))
                 .verticalScroll(rememberScrollState(), enabled = !dragging)
-                .padding(horizontal = 8.dp, vertical = 12.dp),
+                .padding(horizontal = 6.dp, vertical = 6.dp),
             verticalArrangement = Arrangement.spacedBy(ItemGap),
         ) {
             items.forEachIndexed { i, s ->
@@ -131,11 +132,11 @@ fun SideMenu(state: AppState, sections: List<Section>, onSelect: (Section) -> Un
                                 }
                             }
                             .clickable(enabled = !dragging) { onSelect(s) }
-                            .padding(start = 16.dp, end = 20.dp),
+                            .padding(start = 12.dp, end = 16.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Icon(s.icon(), null)
-                        Spacer(Modifier.width(12.dp))
+                        Icon(s.icon(), null, Modifier.size(20.dp))
+                        Spacer(Modifier.width(10.dp))
                         Text(s.title, maxLines = 1, style = MaterialTheme.typography.labelLarge)
                     }
                 }

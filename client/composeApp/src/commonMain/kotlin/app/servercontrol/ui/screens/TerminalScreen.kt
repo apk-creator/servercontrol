@@ -16,12 +16,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentPaste
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -37,6 +39,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import app.servercontrol.AppState
+import app.servercontrol.ui.AppDialog
 import app.servercontrol.SecretField
 import app.servercontrol.Section
 import app.servercontrol.Session
@@ -72,19 +75,21 @@ private fun TerminalRunning(state: AppState) {
     var font by remember { mutableFloatStateOf(if (isDesktop) 14f else 12f) }
     val mods = remember { TerminalInputState() }
     val clipboard = LocalClipboardManager.current
+    var copied by remember { mutableStateOf(false) }
+    LaunchedEffect(copied) { if (copied) { kotlinx.coroutines.delay(1500); copied = false } }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(term.title, Modifier.weight(1f).padding(start = 8.dp), style = MaterialTheme.typography.bodySmall, maxLines = 1)
+            Text(if (copied) "Kopiert" else term.title, Modifier.weight(1f).padding(start = 8.dp), style = MaterialTheme.typography.bodySmall, maxLines = 1)
             if (!terminalHasOwnSelection) {
                 IconButton(onClick = { font = (font - 1f).coerceAtLeast(7f) }) { Icon(Icons.Default.Remove, "Schrift kleiner") }
                 IconButton(onClick = { font = (font + 1f).coerceAtMost(28f) }) { Icon(Icons.Default.Add, "Schrift größer") }
             }
             IconButton(onClick = { clipboard.getText()?.text?.let { term.paste(it) } }) { Icon(Icons.Default.ContentPaste, "Einfügen") }
-            if (!terminalHasOwnSelection) {
-                IconButton(onClick = { clipboard.setText(AnnotatedString(term.backend.screenText() ?: "")) }) {
-                    Icon(Icons.Default.ContentCopy, "Bildschirm kopieren")
-                }
-            }
+            IconButton(onClick = {
+                clipboard.setText(AnnotatedString(term.backend.copyText()))
+                copied = true
+            }) { Icon(Icons.Default.ContentCopy, "Kopieren (Auswahl, sonst Bildschirm)") }
+            IconButton(onClick = { term.backend.clear() }) { Icon(Icons.Default.Delete, "Terminal leeren") }
             IconButton(onClick = { term.close() }) { Icon(Icons.Default.LinkOff, "Trennen") }
         }
         TerminalPane(term, mods, font, Modifier.weight(1f).fillMaxWidth())
@@ -182,7 +187,7 @@ private fun SshConnectForm(state: AppState, session: Session) {
             e.keyType.contains("ecdsa") -> "ecdsa"
             else -> "rsa"
         }
-        AlertDialog(
+        AppDialog(
             onDismissRequest = { d.complete(false) },
             title = { Text("SSH-Hostschlüssel bestätigen") },
             text = {

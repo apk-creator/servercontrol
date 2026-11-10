@@ -13,6 +13,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.sp
 import org.connectbot.terminal.ModifierManager
+import org.connectbot.terminal.SelectionController
 import org.connectbot.terminal.Terminal
 import org.connectbot.terminal.TerminalEmulatorFactory
 import org.connectbot.terminal.VTermKey
@@ -30,6 +31,7 @@ internal class AndroidTerminalBackend(
     onInput: (ByteArray) -> Unit,
     onResize: (Int, Int) -> Unit,
 ) : TerminalBackend {
+    private val onInputRef = onInput
     private val main = Handler(Looper.getMainLooper())
 
     @Volatile override var cols = 80
@@ -57,7 +59,8 @@ internal class AndroidTerminalBackend(
         initialCols = 80,
         defaultForeground = TermFg,
         defaultBackground = TermBg,
-        onKeyboardInput = { data -> onInput(data) },
+        // as soon as something is typed the input line jumps to the top (more room for the output)
+        onKeyboardInput = { data -> liftInputLine(); onInput(data) },
         onResize = { d ->
             cols = d.columns
             rows = d.rows
@@ -67,6 +70,33 @@ internal class AndroidTerminalBackend(
             onResize(d.columns, d.rows)
         },
     )
+
+    /** set by TerminalPane – termlib's selection (for the copy button) */
+    @Volatile var selectionController: SelectionController? = null
+
+    /** main thread: moves the cursor line to the top, locally in both emulators */
+    private fun liftInputLine() {
+        val seq = shadow.liftSequence() ?: return
+        emulator.writeInput(seq, 0, seq.size)
+        shadow.feed(seq)
+    }
+
+    override fun copyText(): String {
+        val sc = selectionController
+        if (sc != null && sc.isSelectionActive) {
+            val t = sc.copySelection()
+            sc.clearSelection()
+            if (t.isNotEmpty()) return t
+        }
+        return shadow.screenText()
+    }
+
+    override fun clear() {
+        val seq = "\u001b[3J".encodeToByteArray() // drop scrollback (libvterm -> clearScrollback)
+        emulator.writeInput(seq, 0, seq.size)
+        main.post { shadow.feed(seq) }
+        onInputRef("\u000c".encodeToByteArray()) // Ctrl+L: shell clears and redraws the prompt
+    }
 
     override fun write(data: ByteArray) {
         emulator.writeInput(data, 0, data.size)
@@ -173,6 +203,7 @@ actual fun TerminalPane(session: TerminalSession, mods: TerminalInputState, font
             keyboardEnabled = true,
             showSoftKeyboard = true,
             modifierManager = modifierManager,
+            onSelectionControllerAvailable = { b.selectionController = it },
         )
     }
 }

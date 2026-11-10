@@ -161,11 +161,11 @@ private fun ServiceDialog(api: ApiClient, unit: String, onDismiss: () -> Unit) {
     val act = { a: String, label: String ->
         host.post("$label: $unit", "/api/system/services/${enc(unit)}/$a") { tick++ }
     }
-    AlertDialog(
+    AppDialog(
         onDismissRequest = onDismiss,
         title = { Text(unit) },
         text = {
-            Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 val p = detail["properties"]
                 KeyValue("Zustand", "${p["ActiveState"].str} / ${p["SubState"].str}")
                 KeyValue("Autostart", p["UnitFileState"].str)
@@ -220,7 +220,7 @@ fun ContainersScreen(api: ApiClient) {
             }
         }
     }
-    logs?.let { (n, l) -> AlertDialog({ logs = null }, { TextButton({ logs = null }) { Text("OK") } }, title = { Text(n) }, text = { MonoText(l) }) }
+    logs?.let { (n, l) -> AppDialog({ logs = null }, { TextButton({ logs = null }) { Text("OK") } }, title = { Text(n) }, text = { MonoText(l) }) }
     ConfirmDialog(confirm) { confirm = null }
     ActionResultDialog(host, api)
 }
@@ -337,12 +337,12 @@ fun StorageScreen(api: ApiClient) {
 private fun SmartDialog(api: ApiClient, dev: String, onDismiss: () -> Unit) {
     val host = rememberActionHost { api }
     var raw by remember { mutableStateOf(false) }
-    AlertDialog(
+    AppDialog(
         onDismissRequest = onDismiss,
         title = { Text("SMART $dev") },
         text = {
             Loader(dev, { api.getJson("/api/system/smart?device=${enc(dev)}") }) { s, _ ->
-                Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     val passed = s["smart_status"]["passed"].bool
                     Text(
                         when (passed) { true -> "Gesundheit: OK"; false -> "Gesundheit: FEHLER"; null -> "Gesundheit: unbekannt" },
@@ -467,7 +467,7 @@ fun ProcessesScreen(api: ApiClient) {
         }
     }
     kill?.let { p ->
-        AlertDialog(
+        AppDialog(
             onDismissRequest = { kill = null },
             title = { Text("${p.comm} (${p.pid}) beenden?") },
             text = { Text(p.args) },

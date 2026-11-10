@@ -1,5 +1,6 @@
 package app.servercontrol
 
+import app.servercontrol.ui.AppDialog
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
@@ -106,7 +107,7 @@ fun App(state: AppState) {
             }
             CrashReportDialog()
             state.pendingCert?.let { (fp, d) ->
-                AlertDialog(
+                AppDialog(
                     onDismissRequest = { d.complete(false) },
                     title = { Text("Zertifikat bestätigen") },
                     text = {
@@ -168,7 +169,7 @@ fun ProfilesScreen(state: AppState) {
 fun ProfileEditor(state: AppState, initial: ServerProfile, onDone: () -> Unit) {
     var p by remember { mutableStateOf(initial) }
     val isNew = state.vault.profiles.none { it.id == initial.id }
-    AlertDialog(
+    AppDialog(
         onDismissRequest = onDone,
         title = { Text(if (isNew) "Server hinzufügen" else "Server bearbeiten") },
         text = {
@@ -363,11 +364,11 @@ fun CrashReportDialog() {
     var report by remember { mutableStateOf(readCrashReport()) }
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     val r = report ?: return
-    AlertDialog(
+    AppDialog(
         onDismissRequest = { clearCrashReport(); report = null },
         title = { Text("Die App ist zuletzt abgestürzt") },
         text = {
-            Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
                 Text("Bitte kopieren und an den Entwickler schicken:", style = MaterialTheme.typography.bodySmall)
                 Spacer(Modifier.height(8.dp))
                 Text(r, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
