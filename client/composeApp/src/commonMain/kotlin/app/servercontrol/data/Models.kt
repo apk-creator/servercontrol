@@ -34,6 +34,9 @@ data class ServerProfile(
     /** public key line of a key generated in the app (for authorized_keys) */
     val sshPublicKey: String = "",
     val sshKeyFingerprint: String = "",
+    /** remembered device on the agent: silent re-login without password (token encrypted in the vault) */
+    val deviceId: String = "",
+    val refreshToken: String = "",
 )
 
 @Serializable
@@ -51,6 +54,8 @@ data class LoginResponse(
     val token: String,
     val idleMinutes: Int = 30,
     val modules: Map<String, Boolean> = emptyMap(),
+    val deviceId: String = "",
+    val refreshToken: String = "",
 )
 
 @Serializable

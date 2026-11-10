@@ -46,7 +46,7 @@ Nextcloud, Immich und Kopia lassen sich komplett in der App einrichten (Bereiche
 
 *Agent → Nach Updates suchen → Jetzt installieren.* Der Agent lädt `servercontrol-agent.tar.gz` aus dem neuesten Release, prüft die neue Datei, ersetzt sich selbst (alte Version bleibt als `.bak`) und startet neu. Für dieses private Repository braucht der Server dafür ein GitHub-Token: *github.com → Settings → Developer settings → Fine-grained tokens*, nur Repository `servercontrol`, Berechtigung **Contents: Read-only**. Alternativ *Datei hochladen …* mit dem Archiv aus dem Release.
 
-**App aktualisieren:** auf derselben Seite unter *App aktualisieren*. Die App lädt ihr Paket (APK, MSI bzw. DEB) über den Agent aus dem neuesten Release – sie braucht dafür kein eigenes Token. Android fragt beim ersten Mal, ob ServerControl Apps installieren darf; unter Windows startet der Installer und die App beendet sich.
+**App aktualisieren:** auf derselben Seite unter *App aktualisieren*. Die App lädt ihr Paket (APK, MSI bzw. DEB) über den Agent aus dem neuesten Release – sie braucht dafür kein eigenes Token. Der Download läuft im Hintergrund weiter (Android: Benachrichtigung mit Fortschritt; ist die App beim Abschluss nicht im Vordergrund, startet ein Tipp auf „Update bereit“ die Installation). Android fragt beim ersten Mal, ob ServerControl Apps installieren darf; unter Windows startet der Installer und die App beendet sich.
 
 Die allererste Umstellung von 1.0.0 auf eine Version mit Update-Funktion geht noch manuell: neues Archiv entpacken und `sudo sh install.sh servercontrol-agent-linux-amd64` erneut ausführen (die Konfiguration bleibt erhalten).
 
@@ -92,7 +92,7 @@ Die App speichert keine Passwörter. Auf Android sind alle Benutzer- und Passwor
 ## Sicherheit
 
 - Profile (Adressen, Fingerprints, SSH-Daten) liegen verschlüsselt: Android mit AES-256-GCM-Schlüssel im Android Keystore, Desktop mit AES-256-GCM aus dem Master-Passwort (PBKDF2-SHA256, 310 000 Iterationen). Android: keine Backups, keine Screenshots (FLAG_SECURE).
-- Agent: nur TLS, Zertifikat in der App gepinnt, Passwort als PBKDF2-SHA256 (600 000 Iterationen), Sperre nach 5 Fehlversuchen für 15 min, Sitzungen laufen nach 30 min Inaktivität / 12 h ab. Befehle werden ohne Shell ausgeführt, Eingaben per Allowlist/Regex geprüft. Der Immich-API-Schlüssel und Kopia-Passwörter verlassen den Server nicht.
+- Agent: nur TLS, Zertifikat in der App gepinnt, Passwort als PBKDF2-SHA256 (600 000 Iterationen), Sperre nach 5 Fehlversuchen für 15 min, Sitzungen laufen nach 30 min Inaktivität / 12 h ab; angemeldete Geräte erneuern die Sitzung still mit einem Geräteschlüssel (nur als SHA-256-Hash auf dem Server, max. 20 Geräte, verfällt nach 180 Tagen Nichtnutzung). *Abmelden* in der App, eine Passwortänderung oder *Angemeldete Geräte → Entfernen* auf der Agent-Seite widerrufen ihn. Befehle werden ohne Shell ausgeführt, Eingaben per Allowlist/Regex geprüft. Der Immich-API-Schlüssel und Kopia-Passwörter verlassen den Server nicht.
 - Der Agent läuft als root – deshalb nur im LAN erreichbar machen.
 
 ## Entwicklung

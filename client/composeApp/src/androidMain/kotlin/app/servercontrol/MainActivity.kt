@@ -39,4 +39,14 @@ class MainActivity : ComponentActivity() {
         }
         setContent { App(app.state) }
     }
+
+    override fun onResume() {
+        super.onResume()
+        UpdateService.appVisible = true
+    }
+
+    override fun onPause() {
+        UpdateService.appVisible = false
+        super.onPause()
+    }
 }

@@ -25,7 +25,8 @@ import app.servercontrol.ButtonRow
 import app.servercontrol.APP_VERSION
 import app.servercontrol.SecretField
 import app.servercontrol.appUpdateAssetPattern
-import app.servercontrol.installAppUpdate
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.LaunchedEffect
 import app.servercontrol.SmallButton
 import app.servercontrol.data.AppJson
 import app.servercontrol.net.ApiClient
@@ -157,7 +158,7 @@ fun ImmichSetup(api: ApiClient, current: JsonElement?, onSaved: () -> Unit) {
 // ======================= Agent: version, update, settings =======================
 
 @Composable
-fun AgentScreen(api: ApiClient) {
+fun AgentScreen(state: app.servercontrol.AppState, api: ApiClient) {
     val host = rememberActionHost { api }
     val scope = rememberCoroutineScope()
     var confirm by remember { mutableStateOf<Confirm?>(null) }
@@ -218,7 +219,8 @@ fun AgentScreen(api: ApiClient) {
                     }
                 }
             }
-            AppUpdateCard(api, check)
+            AppUpdateCard(state, check)
+            DevicesCard(api)
             SectionCard("Update-Quelle") {
                 Text("Für ein privates Repository braucht der Server ein GitHub-Token mit Lesezugriff (Fine-grained Token: nur dieses Repository, Berechtigung „Contents: Read-only“).", fontSize = 13.sp)
                 OutlinedTextField(repo, { repo = it.trim() }, Modifier.fillMaxWidth(), label = { Text("Repository (owner/name)") }, singleLine = true)
@@ -242,13 +244,30 @@ fun AgentScreen(api: ApiClient) {
 
 /** Update of the app itself: the package is downloaded through the agent (which holds the GitHub token). */
 @Composable
-private fun AppUpdateCard(api: ApiClient, check: JsonElement?) {
+private fun AppUpdateCard(state: app.servercontrol.AppState, check: JsonElement?) {
     val pattern = appUpdateAssetPattern ?: return
-    val scope = rememberCoroutineScope()
-    var progress by remember { mutableStateOf<Pair<Long, Long>?>(null) }
-    var message by remember { mutableStateOf<Pair<Boolean, String>?>(null) }
+    val progress = state.appUpdate
     SectionCard("App aktualisieren") {
         KeyValue("Installiert", APP_VERSION)
+        if (progress != null) {
+            if (progress.running) {
+                Text("Lädt ${progress.asset} – läuft auch im Hintergrund weiter.", fontSize = 13.sp)
+                if (progress.total > 0) {
+                    LinearProgressIndicator(progress = { (progress.done.toFloat() / progress.total).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
+                } else {
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                }
+                Text("${formatBytes(progress.done)}${if (progress.total > 0) " von ${formatBytes(progress.total)}" else ""}", fontSize = 12.sp)
+                SmallButton("Abbrechen", { state.cancelAppUpdate() })
+            } else {
+                Text(
+                    if (progress.ok) progress.message ?: "Fertig." else "Update fehlgeschlagen: ${progress.message}",
+                    color = if (progress.ok) StatusOk else StatusBad, fontSize = 13.sp,
+                )
+                SmallButton("OK", { state.dismissAppUpdate() })
+            }
+            return@SectionCard
+        }
         if (check == null) {
             Text("Oben „Nach Updates suchen“ tippen.", fontSize = 13.sp)
             return@SectionCard
@@ -261,25 +280,51 @@ private fun AppUpdateCard(api: ApiClient, check: JsonElement?) {
             latest.isBlank() -> {}
             asset == null -> Text("Im Release ist kein Paket für diese Plattform.", color = StatusWarn, fontSize = 13.sp)
             !newer -> Text("Die App ist aktuell.", color = StatusOk)
-            else -> Button(enabled = progress == null, onClick = {
-                message = null
-                progress = 0L to -1L
-                scope.launch {
-                    message = try {
-                        true to installAppUpdate(api, asset) { done, total -> progress = done to total }
-                    } catch (e: Throwable) {
-                        false to "Update fehlgeschlagen: ${e.message ?: e}"
+            else -> Button(onClick = { state.startAppUpdate(asset) }) { Text("App auf $latest aktualisieren") }
+        }
+    }
+}
+
+/** Installations that stay signed in (remembered devices). */
+@Composable
+private fun DevicesCard(api: ApiClient) {
+    val scope = rememberCoroutineScope()
+    var list by remember { mutableStateOf<JsonElement?>(null) }
+    var reload by remember { mutableStateOf(0) }
+    var askRevoke by remember { mutableStateOf<Pair<String, String>?>(null) }
+    LaunchedEffect(reload) { list = runCatching { api.getJson("/api/devices") }.getOrNull() }
+    SectionCard("Angemeldete Geräte") {
+        Text("Diese Geräte bleiben angemeldet, auch wenn die App lange im Hintergrund war. „Abmelden“ im Menü entfernt das eigene Gerät.", fontSize = 13.sp)
+        val items = list?.arr
+        if (items == null) {
+            Text("…", fontSize = 13.sp)
+        } else if (items.isEmpty()) {
+            Text("Keine.", fontSize = 13.sp)
+        } else {
+            items.forEach { d ->
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(d["name"].str + if (d["current"].bool == true) "  (dieses Gerät)" else "", fontWeight = Bold, fontSize = 14.sp)
+                        Text("zuletzt ${d["lastUsed"].str.take(10)} · seit ${d["created"].str.take(10)}", fontSize = 12.sp)
                     }
-                    progress = null
+                    if (d["current"].bool != true) SmallButton("Entfernen", { askRevoke = d["id"].str to d["name"].str })
                 }
-            }) { Text("App auf $latest aktualisieren") }
+            }
         }
-        progress?.let { (done, total) ->
-            if (total > 0) LinearProgressIndicator(progress = { (done.toFloat() / total).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
-            else LinearProgressIndicator(Modifier.fillMaxWidth())
-            Text("${formatBytes(done)}${if (total > 0) " von ${formatBytes(total)}" else ""}", fontSize = 12.sp)
-        }
-        message?.let { (ok, m) -> Text(m, color = if (ok) StatusOk else StatusBad, fontSize = 13.sp) }
+    }
+    askRevoke?.let { (id, name) ->
+        AppDialog(
+            onDismissRequest = { askRevoke = null },
+            title = { Text("Gerät entfernen?") },
+            text = { Text("„$name“ muss sich danach wieder mit Passwort anmelden.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    askRevoke = null
+                    scope.launch { runCatching { api.postRaw("/api/devices/$id/revoke") }; reload++ }
+                }) { Text("Entfernen") }
+            },
+            dismissButton = { TextButton(onClick = { askRevoke = null }) { Text("Abbrechen") } },
+        )
     }
 }
 

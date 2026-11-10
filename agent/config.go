@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 // KopiaRepo describes one Kopia repository the agent can control.
@@ -54,6 +55,16 @@ type Config struct {
 	Nextcloud          NextcloudConfig `json:"nextcloud"`
 	Immich             ImmichConfig    `json:"immich"`
 	Update             UpdateConfig    `json:"update"`
+	Devices            []Device        `json:"devices,omitempty"`
+}
+
+// Device is an app installation that stays signed in (refresh token, stored only as SHA-256).
+type Device struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	TokenHash string    `json:"tokenHash"`
+	Created   time.Time `json:"created"`
+	LastUsed  time.Time `json:"lastUsed"`
 }
 
 type ConfigStore struct {
@@ -126,6 +137,7 @@ func (s *ConfigStore) Get() Config {
 	c := s.cfg
 	c.Kopia.Repos = append([]KopiaRepo(nil), s.cfg.Kopia.Repos...)
 	c.Nextcloud.OCC = append([]string(nil), s.cfg.Nextcloud.OCC...)
+	c.Devices = append([]Device(nil), s.cfg.Devices...)
 	return c
 }
 
@@ -136,6 +148,7 @@ func (s *ConfigStore) Update(fn func(*Config) error) error {
 	c := s.cfg
 	c.Kopia.Repos = append([]KopiaRepo(nil), s.cfg.Kopia.Repos...)
 	c.Nextcloud.OCC = append([]string(nil), s.cfg.Nextcloud.OCC...)
+	c.Devices = append([]Device(nil), s.cfg.Devices...)
 	if err := fn(&c); err != nil {
 		return err
 	}

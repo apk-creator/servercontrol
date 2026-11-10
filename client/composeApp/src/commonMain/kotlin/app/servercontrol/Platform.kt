@@ -99,4 +99,12 @@ expect val appUpdateAssetPattern: Regex?
  * Downloads [assetName] through the agent and starts the platform installer.
  * Returns a message for the user.
  */
-expect suspend fun installAppUpdate(api: app.servercontrol.net.ApiClient, assetName: String, onProgress: (Long, Long) -> Unit): String
+expect suspend fun installAppUpdate(
+    api: app.servercontrol.net.ApiClient,
+    certFingerprint: String,
+    assetName: String,
+    onProgress: (Long, Long) -> Unit,
+): String
+
+/** Name under which this installation appears in the agent's device list. */
+expect val deviceName: String

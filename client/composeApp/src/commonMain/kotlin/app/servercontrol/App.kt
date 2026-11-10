@@ -154,7 +154,7 @@ fun ProfilesScreen(state: AppState) {
                     },
                     leadingContent = { Icon(Icons.Default.Dns, null) },
                     trailingContent = { IconButton(onClick = { editing = p }) { Icon(Icons.Default.Edit, "Bearbeiten") } },
-                    modifier = Modifier.clickable { state.error = null; state.screen = Screen.Login(p) },
+                    modifier = Modifier.clickable { state.openProfile(p) },
                 )
                 HorizontalDivider()
             }
@@ -325,7 +325,7 @@ fun SectionContent(state: AppState, session: Session) {
         Section.OVERVIEW -> OverviewScreen(api) { state.section = it }
         Section.TERMINAL -> TerminalScreen(state, session)
         Section.SSH_KEYS -> SshKeysScreen(state, session)
-        Section.AGENT -> AgentScreen(api)
+        Section.AGENT -> AgentScreen(state, api)
         Section.SERVICES -> ServicesScreen(api)
         Section.CONTAINERS -> ContainersScreen(api)
         Section.LOGS -> LogsScreen(api)
