@@ -3,7 +3,10 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -54,11 +57,80 @@ func (s *Server) handleNcUsers(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleNcSetupChecks(w http.ResponseWriter, r *http.Request) {
 	s.occJSON(w, r, "setupchecks")
 }
+
+var ncServerUpdRe = regexp.MustCompile(`(?m)^Nextcloud ([0-9][0-9.]*) is available`)
+var ncAppUpdRe = regexp.MustCompile(`(?m)^Update for ([a-z0-9_]+) to version ([0-9][^ ]*) is available`)
+
+// GET /api/nextcloud/updatecheck – raw output plus the parsed server/app updates
 func (s *Server) handleNcUpdateCheck(w http.ResponseWriter, r *http.Request) {
 	if !s.ncEnabled(w) {
 		return
 	}
-	writeJSON(w, 200, s.occ(r, 120*time.Second, nil, "update:check"))
+	res := s.occ(r, 120*time.Second, nil, "update:check")
+	server := ""
+	if m := ncServerUpdRe.FindStringSubmatch(res.Stdout); m != nil {
+		server = m[1]
+	}
+	apps := []map[string]string{}
+	for _, m := range ncAppUpdRe.FindAllStringSubmatch(res.Stdout, -1) {
+		apps = append(apps, map[string]string{"app": m[1], "version": m[2]})
+	}
+	writeJSON(w, 200, map[string]any{
+		"cmd": res.Cmd, "exitCode": res.ExitCode, "stdout": res.Stdout, "stderr": res.Stderr,
+		"server": server, "apps": apps, "updaterAvailable": s.ncUpdater() != nil,
+	})
+}
+
+// ncUpdater: command for updater/updater.phar next to occ, run like occ (e.g. sudo -u www-data php …)
+func (s *Server) ncUpdater() []string {
+	occ := s.cfg.Get().Nextcloud.OCC
+	if len(occ) == 0 {
+		return nil
+	}
+	path := occ[len(occ)-1]
+	if filepath.Base(path) != "occ" {
+		return nil
+	}
+	phar := filepath.Join(filepath.Dir(path), "updater", "updater.phar")
+	if _, err := os.Stat(phar); err != nil {
+		return nil
+	}
+	return append(append([]string{}, occ[:len(occ)-1]...), phar, "--no-interaction")
+}
+
+// GET /api/nextcloud/maintenance-window – start hour (UTC) of the 4-hour window for heavy background jobs
+func (s *Server) handleNcMaintWindow(w http.ResponseWriter, r *http.Request) {
+	if !s.ncEnabled(w) {
+		return
+	}
+	res := s.occ(r, 30*time.Second, nil, "config:system:get", "maintenance_window_start")
+	v := strings.TrimSpace(res.Stdout)
+	out := map[string]any{"set": false}
+	if n, err := strconv.Atoi(v); err == nil && res.ExitCode == 0 {
+		out["set"] = true
+		out["startUtc"] = n
+	}
+	writeJSON(w, 200, out)
+}
+
+// PUT /api/nextcloud/maintenance-window {"startUtc": 0..23} or {"startUtc": -1} to remove
+func (s *Server) handleNcMaintWindowSet(w http.ResponseWriter, r *http.Request) {
+	if !s.ncEnabled(w) {
+		return
+	}
+	var req struct {
+		StartUtc int `json:"startUtc"`
+	}
+	if err := readJSON(r, &req); err != nil || req.StartUtc < -1 || req.StartUtc > 23 {
+		writeErr(w, 400, "startUtc must be 0..23 or -1")
+		return
+	}
+	logf("nextcloud maintenance window → %d", req.StartUtc)
+	if req.StartUtc < 0 {
+		sendResult(w, s.occ(r, 30*time.Second, nil, "config:system:delete", "maintenance_window_start"))
+		return
+	}
+	sendResult(w, s.occ(r, 30*time.Second, nil, "config:system:set", "maintenance_window_start", "--type=integer", "--value="+strconv.Itoa(req.StartUtc)))
 }
 
 func (s *Server) handleNcBackgroundMode(w http.ResponseWriter, r *http.Request) {
@@ -120,6 +192,13 @@ func (s *Server) handleNcAction(w http.ResponseWriter, r *http.Request) {
 		jobStarted(w, s.occJob("Reparatur (umfangreich)", "maintenance:repair", "--include-expensive"))
 	case "upgrade":
 		jobStarted(w, s.occJob("Upgrade", "upgrade"))
+	case "server-update":
+		cmd := s.ncUpdater()
+		if cmd == nil {
+			writeErr(w, 404, "updater/updater.phar not found next to occ")
+			return
+		}
+		jobStarted(w, s.jobs.Start("Nextcloud: Server-Update", 2*time.Hour, nil, cmd[0], cmd[1:]...))
 	case "add-missing-indices":
 		jobStarted(w, s.occJob("Fehlende Indizes", "db:add-missing-indices"))
 	case "add-missing-columns":

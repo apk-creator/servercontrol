@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -72,13 +73,14 @@ private fun ImmichStatus(api: ApiClient) {
         }
     }) { d, reload ->
         Column(Modifier.verticalScroll(rememberScrollState())) {
-            SectionCard("Immich") {
+            SectionCard("Immich", actions = { RefreshButton(reload) }) {
                 val about = d["about"]
-                KeyValue("Version", about["version"].str)
-                d["version-check"]?.let { vc -> if (vc["releaseVersion"].str.isNotBlank()) KeyValue("Neueste Version", vc["releaseVersion"].str) }
-                KeyValue("Node / FFmpeg", "${about["nodejs"].str} / ${about["ffmpeg"].str}")
-                KeyValue("Lizenziert", about["licensed"].str)
-                SmallButton("Neu laden", reload)
+                KeyValues(
+                    "Version" to about["version"].str,
+                    d["version-check"]?.takeIf { it["releaseVersion"].str.isNotBlank() }?.let { "Neueste Version" to it["releaseVersion"].str },
+                    "Node / FFmpeg" to "${about["nodejs"].str} / ${about["ffmpeg"].str}",
+                    "Lizenziert" to about["licensed"].str,
+                )
             }
             d["storage"]?.let { s ->
                 SectionCard("Speicher") {
@@ -87,14 +89,11 @@ private fun ImmichStatus(api: ApiClient) {
             }
             d["statistics"]?.let { st ->
                 SectionCard("Statistik") {
-                    KeyValue("Fotos", st["photos"].str)
-                    KeyValue("Videos", st["videos"].str)
-                    KeyValue("Belegt", formatBytes(st["usage"].long))
-                    st["usageByUser"].arr.forEach { u ->
-                        KeyValue(u["userName"].str, "${u["photos"].str} Fotos · ${u["videos"].str} Videos · ${formatBytes(u["usage"].long)}")
-                    }
+                    val rows = listOf("Fotos" to st["photos"].str, "Videos" to st["videos"].str, "Belegt" to formatBytes(st["usage"].long)) +
+                        st["usageByUser"].arr.map { u -> u["userName"].str to "${u["photos"].str} Fotos · ${u["videos"].str} Videos · ${formatBytes(u["usage"].long)}" }
+                    rows.forEachIndexed { i, (k, v) -> KeyValue(k, v, i) }
                 }
-            } ?: SectionCard { Text("Statistik nicht verfügbar – der API-Schlüssel braucht Admin-Rechte (server.statistics).", fontSize = 12.sp) }
+            } ?: SectionCard { Text("Statistik nicht verfügbar – der API-Schlüssel braucht Admin-Rechte (server.statistics).", fontSize = TextSmall) }
         }
     }
 }
@@ -123,7 +122,7 @@ private fun ImmichJobs(api: ApiClient, host: ActionHost) {
                 })
             SectionCard(jobNames[name] ?: name) {
                 Text("aktiv ${c["active"].str} · wartend ${c["waiting"].str} · verzögert ${c["delayed"].str} · fehlgeschlagen ${c["failed"].str}" +
-                    (if (paused) " · PAUSIERT" else ""), fontSize = 12.sp,
+                    (if (paused) " · PAUSIERT" else ""), fontSize = TextSmall,
                     color = if ((c["failed"].long ?: 0) > 0) StatusWarn else MaterialTheme.colorScheme.onSurface)
                 ButtonRow {
                     SmallButton("Fehlende", { cmd("start") })
@@ -143,24 +142,24 @@ private fun ImmichUsers(api: ApiClient, host: ActionHost, ask: (Confirm) -> Unit
     var sel by remember { mutableStateOf<JsonElement?>(null) }
     Loader(host.result == null, { api.getJson("$IM/admin/users?withDeleted=true") }) { users, reload ->
         Column {
-            Row(Modifier.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("${users.arr.size} Benutzer", Modifier.weight(1f))
-                TextButton(onClick = { adding = true }) { Text("Neu") }
+            ListHeader("${users.arr.size} Benutzer") {
+                AddButton({ adding = true }, "Benutzer anlegen")
+                RefreshButton(reload)
             }
             LazyColumn {
-                items(users.arr) { u ->
+                itemsIndexed(users.arr) { i, u ->
                     val deleted = u["deletedAt"].str.isNotBlank()
-                    ListItem(
-                        leadingContent = { StatusDot(if (deleted) StatusBad else StatusOk) },
-                        headlineContent = { Text(u["name"].str + if (u["isAdmin"].bool == true) "  (Admin)" else "") },
-                        supportingContent = {
+                    StripedItem(
+                        i,
+                        leading = { StatusDot(if (deleted) StatusBad else StatusOk) },
+                        headline = { Text(u["name"].str + if (u["isAdmin"].bool == true) "  (Admin)" else "") },
+                        supporting = {
                             Text("${u["email"].str} · belegt ${formatBytes(u["quotaUsageInBytes"].long)}" +
                                 (u["quotaSizeInBytes"].long?.let { " von ${formatBytes(it)}" } ?: "") +
-                                (if (deleted) " · gelöscht" else ""), fontSize = 12.sp)
+                                (if (deleted) " · gelöscht" else ""), fontSize = TextSmall)
                         },
-                        modifier = Modifier.clickable { sel = u },
+                        onClick = { sel = u },
                     )
-                    HorizontalDivider()
                 }
             }
         }
@@ -220,13 +219,14 @@ private fun ImmichUsers(api: ApiClient, host: ActionHost, ask: (Confirm) -> Unit
 
 @Composable
 private fun ImmichLibraries(api: ApiClient, host: ActionHost) {
-    Loader(Unit, { api.getJson("$IM/libraries") }) { libs, _ ->
+    Loader(Unit, { api.getJson("$IM/libraries") }) { libs, reload ->
         Column(Modifier.verticalScroll(rememberScrollState())) {
+            ListHeader("${libs.arr.size} externe Bibliotheken") { RefreshButton(reload) }
             if (libs.arr.isEmpty()) Text("Keine externen Bibliotheken.", Modifier.padding(16.dp))
             libs.arr.forEach { l ->
                 SectionCard(l["name"].str) {
-                    Text(l["importPaths"].arr.joinToString { it.str }, fontSize = 12.sp)
-                    Text("${l["assetCount"].str} Dateien · zuletzt gescannt ${l["refreshedAt"].str.take(19).replace('T', ' ')}", fontSize = 12.sp, fontWeight = Bold)
+                    Text(l["importPaths"].arr.joinToString { it.str }, fontSize = TextSmall)
+                    Text("${l["assetCount"].str} Dateien · zuletzt gescannt ${l["refreshedAt"].str.take(19).replace('T', ' ')}", fontSize = TextSmall, fontWeight = Bold)
                     SmallButton("Jetzt scannen", { host.post("Scan ${l["name"].str}", "$IM/libraries/${l["id"].str}/scan") })
                 }
             }

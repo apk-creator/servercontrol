@@ -39,6 +39,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -71,10 +73,11 @@ fun SideMenu(state: AppState, sections: List<Section>, onSelect: (Section) -> Un
         shadowElevation = 8.dp,
         shape = RoundedCornerShape(topEnd = 16.dp, bottomEnd = 16.dp),
     ) {
+        // stay clear of the status bar / navigation bar (Android draws edge-to-edge)
+        Column(Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Vertical + WindowInsetsSides.Start))) {
         Column(
             Modifier
-                // stay clear of the status bar / navigation bar (Android draws edge-to-edge)
-                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Vertical + WindowInsetsSides.Start))
+                .weight(1f)
                 .verticalScroll(rememberScrollState(), enabled = !dragging)
                 .padding(horizontal = 6.dp, vertical = 6.dp),
             verticalArrangement = Arrangement.spacedBy(ItemGap),
@@ -141,6 +144,23 @@ fun SideMenu(state: AppState, sections: List<Section>, onSelect: (Section) -> Un
                     }
                 }
             }
+        }
+        // sign out: bottom left, apart from the sortable entries
+        androidx.compose.material3.HorizontalDivider(Modifier.padding(horizontal = 12.dp))
+        Row(
+            Modifier
+                .padding(6.dp)
+                .fillMaxWidth()
+                .height(ItemHeight)
+                .clip(ItemShape)
+                .clickable(enabled = !dragging) { state.logout() }
+                .padding(start = 12.dp, end = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(androidx.compose.material.icons.Icons.AutoMirrored.Filled.Logout, null, Modifier.size(20.dp))
+            Spacer(Modifier.width(10.dp))
+            Text("Abmelden", maxLines = 1, style = MaterialTheme.typography.labelLarge)
+        }
         }
     }
 }

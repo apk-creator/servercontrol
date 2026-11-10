@@ -61,6 +61,7 @@ func main() {
 	logf("ServerControl agent %s – certificate fingerprint %s", version, fpr)
 
 	s := &Server{cfg: store, auth: NewAuth(store), jobs: NewJobs()}
+	metrics.Start()
 	handler := securityHeaders(s.routes())
 
 	cert, err := tls.LoadX509KeyPair(cfg.TLSCert, cfg.TLSKey)
@@ -147,6 +148,7 @@ func (s *Server) routes() http.Handler {
 	priv.HandleFunc("POST /api/system/updates/refresh", s.handleUpdatesRefresh)
 	priv.HandleFunc("POST /api/system/updates/upgrade", s.handleUpdatesUpgrade)
 	priv.HandleFunc("POST /api/system/power/{action}", handlePower)
+	priv.HandleFunc("GET /api/system/history", handleHistory)
 	priv.HandleFunc("POST /api/system/shell", s.handleShell)
 	priv.HandleFunc("GET /api/containers", handleContainers)
 	priv.HandleFunc("GET /api/containers/{name}/logs", handleContainerLogs)
@@ -164,6 +166,9 @@ func (s *Server) routes() http.Handler {
 	priv.HandleFunc("GET /api/kopia/repos/{repo}/status", s.handleKopiaStatus)
 	priv.HandleFunc("GET /api/kopia/repos/{repo}/snapshots", s.handleKopiaSnapshots)
 	priv.HandleFunc("GET /api/kopia/repos/{repo}/policies", s.handleKopiaPolicies)
+	priv.HandleFunc("GET /api/kopia/repos/{repo}/schedule", s.handleKopiaSchedule)
+	priv.HandleFunc("POST /api/kopia/repos/{repo}/schedule", s.handleKopiaScheduleSet)
+	priv.HandleFunc("POST /api/kopia/repos/{repo}/maintenance-schedule", s.handleKopiaMaintSet)
 	priv.HandleFunc("POST /api/kopia/repos/{repo}/{action}", s.handleKopiaAction)
 	// nextcloud
 	priv.HandleFunc("GET /api/nextcloud/status", s.handleNcStatus)
@@ -172,6 +177,8 @@ func (s *Server) routes() http.Handler {
 	priv.HandleFunc("GET /api/nextcloud/setupchecks", s.handleNcSetupChecks)
 	priv.HandleFunc("GET /api/nextcloud/updatecheck", s.handleNcUpdateCheck)
 	priv.HandleFunc("GET /api/nextcloud/background", s.handleNcBackgroundMode)
+	priv.HandleFunc("GET /api/nextcloud/maintenance-window", s.handleNcMaintWindow)
+	priv.HandleFunc("PUT /api/nextcloud/maintenance-window", s.handleNcMaintWindowSet)
 	priv.HandleFunc("POST /api/nextcloud/action/{action}", s.handleNcAction)
 	priv.HandleFunc("GET /api/kopia/discover", s.handleKopiaDiscover)
 	priv.HandleFunc("POST /api/kopia/connect", s.handleKopiaConnect)

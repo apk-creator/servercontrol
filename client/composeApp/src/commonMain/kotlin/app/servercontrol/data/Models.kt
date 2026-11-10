@@ -78,7 +78,45 @@ data class Overview(
     val temperatures: List<Temp> = emptyList(),
     val rebootRequired: Boolean = false,
     val failedUnits: Int = 0,
+    val cores: List<Double> = emptyList(),
+    val disk: DiskIo = DiskIo(),
+    val net: NetIo = NetIo(),
+    val tempBoard: TempStats = TempStats(),
+    val tempDisks: TempStats = TempStats(),
+    val hddTemps: List<DiskTemp> = emptyList(),
+    val hddStandby: Int = 0,
+    val filesystems: List<MountInfo> = emptyList(),
+    val scheduledPower: ScheduledPower? = null,
 )
+
+@Serializable
+data class DiskIo(val read: Double = 0.0, val write: Double = 0.0, val busy: Double = 0.0)
+
+@Serializable
+data class NetIo(val rx: Double = 0.0, val tx: Double = 0.0)
+
+@Serializable
+data class TempStats(val min: Double = 0.0, val avg: Double = 0.0, val max: Double = 0.0, val count: Int = 0)
+
+@Serializable
+data class DiskTemp(val device: String = "", val model: String = "", val celsius: Double = 0.0, val standby: Boolean = false)
+
+@Serializable
+data class ScheduledPower(val mode: String = "", val at: Long = 0)
+
+@Serializable
+data class MetricPoint(
+    val cpu: Double = 0.0,
+    val mem: Double = 0.0,
+    val diskRead: Double = 0.0,
+    val diskWrite: Double = 0.0,
+    val diskBusy: Double = 0.0,
+    val netRx: Double = 0.0,
+    val netTx: Double = 0.0,
+)
+
+@Serializable
+data class MetricHistory(val intervalSeconds: Int = 5, val points: List<MetricPoint> = emptyList())
 
 @Serializable
 data class ServiceUnit(

@@ -8,7 +8,8 @@ plugins {
     id("com.android.application")
 }
 
-val appVersion = "1.7.0"
+// release tags have two parts (v1.8); installers need MAJOR.MINOR.PATCH
+val appVersion = "1.8"
 val ktor = "3.1.3"
 
 // APP_VERSION constant for the in-app updater
@@ -108,7 +109,7 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Deb, TargetFormat.Msi)
             packageName = "ServerControl"
-            packageVersion = appVersion
+            packageVersion = if (appVersion.count { it == '.' } == 1) "$appVersion.0" else appVersion
             description = "ServerControl – Debian-Server-Verwaltung"
             vendor = "apk-creator"
             modules("java.naming", "jdk.crypto.ec", "java.logging", "java.security.jgss")

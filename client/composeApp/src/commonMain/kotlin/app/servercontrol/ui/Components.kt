@@ -1,6 +1,12 @@
 package app.servercontrol.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -71,7 +77,36 @@ fun formatDuration(s: Long): String {
     }
 }
 
+/** ISO-8601 time ("2026-11-09T01:00:03.12+01:00" or "…Z") → epoch millis, null if unreadable. */
+fun isoToMs(s: String): Long? {
+    val m = Regex("""^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})(\.\d+)?(Z|[+-]\d{2}:?\d{2})?""").find(s.trim()) ?: return null
+    val g = m.groupValues
+    val y = g[1].toLong(); val mo = g[2].toLong(); val d = g[3].toLong()
+    // days from civil (Howard Hinnant)
+    val yy = if (mo <= 2) y - 1 else y
+    val era = (if (yy >= 0) yy else yy - 399) / 400
+    val yoe = yy - era * 400
+    val doy = (153 * (if (mo > 2) mo - 3 else mo + 9) + 2) / 5 + d - 1
+    val doe = yoe * 365 + yoe / 4 - yoe / 100 + doy
+    val days = era * 146097 + doe - 719468
+    var ms = ((days * 24 + g[4].toLong()) * 60 + g[5].toLong()) * 60_000 + g[6].toLong() * 1000
+    g[7].takeIf { it.length > 1 }?.let { ms += (it.drop(1) + "000").take(3).toLong() }
+    val z = g[8]
+    if (z.isNotEmpty() && z != "Z") {
+        val digits = z.drop(1).replace(":", "")
+        val off = (digits.take(2).toLong() * 60 + digits.drop(2).toLong()) * 60_000
+        ms -= if (z[0] == '+') off else -off
+    }
+    return ms
+}
+
 fun pct(used: Long, total: Long): Float = if (total <= 0) 0f else (used.toFloat() / total).coerceIn(0f, 1f)
+
+/** The app uses exactly two font sizes. */
+val TextBig = 15.sp
+val TextSmall = 12.sp
+val LineBig = 20.sp
+val LineSmall = 16.sp
 
 val StatusOk = Color(0xFF2E7D32)
 val StatusWarn = Color(0xFFF9A825)
@@ -125,29 +160,121 @@ fun ErrorCard(msg: String, retry: (() -> Unit)? = null) {
     }
 }
 
+/** Open/closed state of the cards, kept while the app runs (key = card title). */
+object CardState {
+    val collapsed = androidx.compose.runtime.mutableStateMapOf<String, Boolean>()
+}
+
+/**
+ * Card with a title row: title, optional [actions] (e.g. refresh) and a small arrow
+ * to collapse (↑) or expand (↓) the card.
+ */
 @Composable
-fun SectionCard(title: String? = null, modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+fun SectionCard(
+    title: String? = null,
+    modifier: Modifier = Modifier,
+    collapsible: Boolean = true,
+    stateKey: String? = null,
+    actions: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {},
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val key = stateKey ?: title ?: ""
+    val closed = collapsible && title != null && CardState.collapsed[key] == true
     Card(modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            if (title != null) Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            content()
+        Column(Modifier.padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = if (closed) 4.dp else 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (title != null) {
+                Row(Modifier.fillMaxWidth().heightIn(min = 40.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(title, Modifier.weight(1f), fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                    actions()
+                    if (collapsible) {
+                        IconButton(onClick = { CardState.collapsed[key] = !closed }, modifier = Modifier.size(36.dp)) {
+                            Icon(
+                                if (closed) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowUp,
+                                if (closed) "Ausklappen" else "Einklappen",
+                                Modifier.size(20.dp),
+                            )
+                        }
+                    }
+                }
+            }
+            if (!closed) {
+                Column(Modifier.padding(end = 8.dp, top = if (title == null) 8.dp else 0.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) { content() }
+            }
         }
     }
 }
 
+/** Refresh symbol (instead of a "Neu laden" button). */
 @Composable
-fun KeyValue(k: String, v: String) {
-    Row(Modifier.fillMaxWidth()) {
-        Text(k, Modifier.width(112.dp).padding(end = 8.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(v, Modifier.weight(1f))
+fun RefreshButton(onClick: () -> Unit) {
+    IconButton(onClick = onClick, modifier = Modifier.size(40.dp)) { Icon(Icons.Default.Refresh, "Neu laden", Modifier.size(22.dp)) }
+}
+
+@Composable
+fun AddButton(onClick: () -> Unit, description: String = "Hinzufügen") {
+    IconButton(onClick = onClick, modifier = Modifier.size(40.dp)) { Icon(Icons.Default.Add, description, Modifier.size(24.dp)) }
+}
+
+/** Header row above a list: text on the left, symbols on the right. */
+@Composable
+fun ListHeader(text: String, actions: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {}) {
+    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(text, Modifier.weight(1f), fontSize = TextSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        actions()
     }
+}
+
+/** Background of row [i] in lists and tables: rows alternate (A B A B) for easier reading. */
+@Composable
+fun stripe(i: Int): Color = if (i % 2 == 1) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f) else Color.Transparent
+
+/** List row with alternating background. */
+@Composable
+fun StripedItem(
+    index: Int,
+    headline: @Composable () -> Unit,
+    modifier: Modifier = Modifier,
+    supporting: (@Composable () -> Unit)? = null,
+    leading: (@Composable () -> Unit)? = null,
+    trailing: (@Composable () -> Unit)? = null,
+    onClick: (() -> Unit)? = null,
+) {
+    androidx.compose.material3.ListItem(
+        headlineContent = headline,
+        supportingContent = supporting,
+        leadingContent = leading,
+        trailingContent = trailing,
+        colors = androidx.compose.material3.ListItemDefaults.colors(containerColor = stripe(index)),
+        modifier = modifier.then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
+    )
+}
+
+/** Key/value row; [index] ≥ 0 gives it the alternating background. */
+@Composable
+fun KeyValue(k: String, v: String, index: Int = -1, valueColor: Color = Color.Unspecified, onClick: (() -> Unit)? = null) {
+    Row(
+        Modifier.fillMaxWidth()
+            .background(if (index >= 0) stripe(index) else Color.Transparent, androidx.compose.foundation.shape.RoundedCornerShape(4.dp))
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(horizontal = 4.dp, vertical = 3.dp),
+    ) {
+        Text(k, Modifier.width(128.dp).padding(end = 8.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, softWrap = false,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+        Text(v, Modifier.weight(1f), color = valueColor)
+    }
+}
+
+/** Table of key/value rows with alternating background; null entries are skipped. */
+@Composable
+fun KeyValues(vararg rows: Pair<String, String>?) {
+    Column { rows.filterNotNull().forEachIndexed { i, (k, v) -> KeyValue(k, v, i) } }
 }
 
 @Composable
 fun UsageBar(label: String, used: Long, total: Long, detail: String) {
     val p = pct(used, total)
     Column {
-        Row { Text(label, Modifier.weight(1f)); Text(detail, style = MaterialTheme.typography.bodySmall) }
+        Row(verticalAlignment = Alignment.CenterVertically) { Text(label, Modifier.weight(1f)); Text(detail, fontSize = TextSmall) }
         LinearProgressIndicator(
             progress = { p },
             modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
@@ -160,7 +287,7 @@ fun UsageBar(label: String, used: Long, total: Long, detail: String) {
 fun MonoText(text: String, modifier: Modifier = Modifier) {
     SelectionContainer {
         Box(modifier.horizontalScroll(rememberScrollState())) {
-            Text(text, fontFamily = FontFamily.Monospace, fontSize = 12.sp, lineHeight = 15.sp)
+            Text(text, fontFamily = FontFamily.Monospace, fontSize = TextSmall, lineHeight = LineSmall)
         }
     }
 }

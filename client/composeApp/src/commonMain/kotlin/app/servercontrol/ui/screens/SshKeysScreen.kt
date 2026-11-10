@@ -1,5 +1,6 @@
 package app.servercontrol.ui.screens
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -76,7 +77,7 @@ fun SshKeysScreen(state: AppState, session: Session) {
             val p = session.profile
             if (p.sshPrivateKey.isBlank()) {
                 Text("Noch kein Schlüssel. Erzeuge hier einen eigenen Schlüssel für dieses Gerät – " +
-                    "der private Teil bleibt verschlüsselt in der App, nur der öffentliche kommt auf den Server.", fontSize = 13.sp)
+                    "der private Teil bleibt verschlüsselt in der App, nur der öffentliche kommt auf den Server.", fontSize = TextSmall)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     SshKeyAlgo.entries.forEach { a ->
                         FilterChip(algo == a, {
@@ -111,18 +112,17 @@ fun SshKeysScreen(state: AppState, session: Session) {
                 TextButton(onClick = { importKey = true }) { Text("Stattdessen vorhandenen privaten Schlüssel einfügen …") }
             } else {
                 if (p.sshPublicKey.isNotBlank()) {
-                    KeyValue("Typ", p.sshPublicKey.substringBefore(' '))
-                    KeyValue("Fingerprint", p.sshKeyFingerprint)
-                    Text("Öffentlicher Schlüssel:", fontSize = 12.sp)
+                    KeyValues("Typ" to p.sshPublicKey.substringBefore(' '), "Fingerprint" to p.sshKeyFingerprint)
+                    Text("Öffentlicher Schlüssel:", fontSize = TextSmall)
                     MonoText(p.sshPublicKey)
                     ButtonRow {
                         SmallButton("Kopieren", { clipboard.setText(AnnotatedString(p.sshPublicKey)) })
                         Button(enabled = user.isNotBlank(), onClick = { register(p.sshPublicKey) }) { Text("Auf dem Server eintragen") }
                     }
                 } else {
-                    Text("Ein importierter privater Schlüssel ist hinterlegt (im Terminal-Dialog eingefügt).", fontSize = 13.sp)
+                    Text("Ein importierter privater Schlüssel ist hinterlegt (im Terminal-Dialog eingefügt).", fontSize = TextSmall)
                 }
-                Text("Das Terminal meldet sich damit automatisch an (Benutzer: ${user.ifBlank { "–" }}).", fontSize = 12.sp)
+                Text("Das Terminal meldet sich damit automatisch an (Benutzer: ${user.ifBlank { "–" }}).", fontSize = TextSmall)
                 ButtonRow {
                     SmallButton("Schlüssel löschen", {
                         confirm = Confirm("Schlüssel dieses Geräts löschen?",
@@ -144,10 +144,10 @@ fun SshKeysScreen(state: AppState, session: Session) {
             if (user.isNotBlank()) {
                 Loader(user to refresh, { api.getJson("/api/ssh/keys?user=${user.trim()}") }) { d, reload ->
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(d["file"].str, fontSize = 12.sp)
+                        Text(d["file"].str, fontSize = TextSmall)
                         val pw = d["passwordAuthentication"].str
                         if (pw.isNotBlank()) {
-                            Text("Passwort-Anmeldung per SSH: ${if (pw == "yes") "an" else "aus"}", fontSize = 12.sp, fontWeight = Bold)
+                            Text("Passwort-Anmeldung per SSH: ${if (pw == "yes") "an" else "aus"}", fontSize = TextSmall, fontWeight = Bold)
                             val keyCount = d["keys"].arr.size
                             val mineRegistered = d["keys"].arr.any { it["fingerprint"].str == session.profile.sshKeyFingerprint }
                             fun toggle(enable: Boolean) {
@@ -166,15 +166,14 @@ fun SshKeysScreen(state: AppState, session: Session) {
                             })
                             if (pw == "no") SmallButton("Passwort-Anmeldung wieder einschalten", { toggle(true) })
                         }
-                        if (d["keys"].arr.isEmpty()) Text("Noch keine Schlüssel eingetragen.", fontSize = 13.sp)
-                        d["keys"].arr.forEach { k ->
+                        if (d["keys"].arr.isEmpty()) Text("Noch keine Schlüssel eingetragen.", fontSize = TextSmall)
+                        d["keys"].arr.forEachIndexed { i, k ->
                             val fp = k["fingerprint"].str
                             val mine = fp == session.profile.sshKeyFingerprint
-                            HorizontalDivider()
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            Row(Modifier.fillMaxWidth().background(stripe(i)).padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Column(Modifier.weight(1f)) {
                                     Text(k["comment"].str.ifBlank { "(ohne Kommentar)" } + if (mine) "  · dieses Gerät" else "", fontWeight = Bold)
-                                    Text("${k["type"].str}  $fp", fontSize = 11.sp)
+                                    Text("${k["type"].str}  $fp", fontSize = TextSmall)
                                 }
                                 TextButton(onClick = {
                                     confirm = Confirm("Schlüssel austragen?",
@@ -194,7 +193,7 @@ fun SshKeysScreen(state: AppState, session: Session) {
 
         SectionCard("Hinweis") {
             Text("Erzeuge für jedes Gerät einen eigenen Schlüssel und trage ihn ein. Die Passwort-Anmeldung erst abschalten, " +
-                "wenn sich alle Geräte per Schlüssel anmelden – und dabei eine zweite Sitzung offen lassen.", fontSize = 12.sp)
+                "wenn sich alle Geräte per Schlüssel anmelden – und dabei eine zweite Sitzung offen lassen.", fontSize = TextSmall)
         }
     }
 
@@ -205,7 +204,7 @@ fun SshKeysScreen(state: AppState, session: Session) {
             title = { Text("Öffentlichen Schlüssel hinzufügen") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Inhalt der .pub-Datei, z. B. „ssh-ed25519 AAAA… name@pc“", fontSize = 12.sp)
+                    Text("Inhalt der .pub-Datei, z. B. „ssh-ed25519 AAAA… name@pc“", fontSize = TextSmall)
                     OutlinedTextField(text, { text = it }, Modifier.fillMaxWidth(), minLines = 3, maxLines = 6)
                 }
             },
@@ -222,7 +221,7 @@ fun SshKeysScreen(state: AppState, session: Session) {
             title = { Text("Privaten Schlüssel einfügen") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Inhalt der privaten Schlüsseldatei (OpenSSH oder PEM). Er wird verschlüsselt im Profil gespeichert.", fontSize = 12.sp)
+                    Text("Inhalt der privaten Schlüsseldatei (OpenSSH oder PEM). Er wird verschlüsselt im Profil gespeichert.", fontSize = TextSmall)
                     OutlinedTextField(
                         text, { text = it }, Modifier.fillMaxWidth(), minLines = 1, maxLines = 1,
                         visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
