@@ -1,5 +1,6 @@
 package app.servercontrol.ui.screens
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -9,6 +10,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.put
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -49,6 +55,7 @@ fun NextcloudMain(api: ApiClient, onSetup: () -> Unit) {
             2 -> NcApps(api, host) { confirm = it }
             4 -> LaunchedEffect(Unit) { tab = 0; onSetup() }
             3 -> Column(Modifier.verticalScroll(rememberScrollState())) {
+                NcMaintenanceWindow(api, host)
                 SectionCard("Datenbank") {
                     ButtonRow {
                         SmallButton("Fehlende Indizes", { act("Fehlende Indizes", "add-missing-indices", null) })
@@ -73,8 +80,10 @@ fun NextcloudMain(api: ApiClient, onSetup: () -> Unit) {
                 }
                 SectionCard("Hintergrundjobs") {
                     Loader(host.result == null, { api.getJson("$NC/background") }) { b, _ ->
-                        KeyValue("Modus", b["mode"].str)
-                        b["lastCron"].str.toLongOrNull()?.let { KeyValue("Letzter Lauf", formatTime(it * 1000)) }
+                        KeyValues(
+                            "Modus" to b["mode"].str,
+                            b["lastCron"].str.toLongOrNull()?.let { "Letzter Lauf" to formatTime(it * 1000) },
+                        )
                     }
                     ButtonRow {
                         listOf("cron", "webcron", "ajax").forEach { m ->
@@ -91,37 +100,117 @@ fun NextcloudMain(api: ApiClient, onSetup: () -> Unit) {
 
 @Composable
 private fun NcStatus(api: ApiClient, host: ActionHost, ask: (Confirm) -> Unit) {
+    var upd by remember { mutableStateOf<JsonElement?>(null) }
+    var checking by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
     Loader(host.result == null, { api.getJson("$NC/status") }) { st, reload ->
         Column(Modifier.verticalScroll(rememberScrollState())) {
-            SectionCard("Nextcloud") {
-                KeyValue("Version", st["versionstring"].str)
-                KeyValue("Installiert", st["installed"].str)
+            SectionCard("Nextcloud", actions = { RefreshButton(reload) }) {
                 val maint = st["maintenance"].bool == true
-                KeyValue("Wartungsmodus", if (maint) "AN" else "aus")
+                KeyValues(
+                    "Version" to st["versionstring"].str,
+                    "Installiert" to st["installed"].str,
+                    "Wartungsmodus" to if (maint) "AN" else "aus",
+                )
                 if (st["needsDbUpgrade"].bool == true) Text("Datenbank-Upgrade erforderlich (occ upgrade).", color = StatusWarn)
                 ButtonRow {
                     if (maint) SmallButton("Wartungsmodus aus", { host.post("Wartungsmodus aus", "$NC/action/maintenance-off", after = reload) })
                     else SmallButton("Wartungsmodus an", { ask(Confirm("Wartungsmodus aktivieren?", "Benutzer können Nextcloud dann nicht nutzen.") { host.post("Wartungsmodus an", "$NC/action/maintenance-on", after = reload) }) })
-                    SmallButton("Nach Updates suchen", { host.run("Update-Prüfung", { api.getJson("$NC/updatecheck")["stdout"].str.ifBlank { "Keine Ausgabe" } }) })
-                    SmallButton("Neu laden", reload)
+                    SmallButton(if (checking) "Prüfe …" else "Nach Updates suchen", {
+                        checking = true
+                        scope.launch {
+                            upd = runCatching { api.getJson("$NC/updatecheck") }.getOrElse { e ->
+                                kotlinx.serialization.json.buildJsonObject { put("stderr", e.message ?: e.toString()) }
+                            }
+                            checking = false
+                        }
+                    }, enabled = !checking)
+                }
+            }
+            upd?.let { u ->
+                SectionCard("Updates") {
+                    val server = u["server"].str
+                    val apps = u["apps"].arr
+                    if (server.isBlank() && apps.isEmpty()) {
+                        Text(u["stdout"].str.ifBlank { u["stderr"].str }.ifBlank { "Alles aktuell." }.trim(), fontSize = TextSmall)
+                    }
+                    if (server.isNotBlank()) {
+                        Text("Nextcloud $server ist verfügbar.", fontWeight = Bold, color = StatusWarn)
+                        if (u["updaterAvailable"].bool == true) {
+                            Button(onClick = {
+                                ask(Confirm("Nextcloud auf $server aktualisieren?",
+                                    "Der Updater schaltet den Wartungsmodus ein, lädt die neue Version, führt „occ upgrade“ aus und schaltet den Wartungsmodus wieder aus. " +
+                                        "Vorher sollte ein aktuelles Backup existieren. Das kann einige Minuten dauern.") {
+                                    host.post("Nextcloud-Update", "$NC/action/server-update")
+                                })
+                            }) { Text("Nextcloud aktualisieren") }
+                        } else {
+                            Text("Der Updater (updater/updater.phar neben occ) wurde nicht gefunden.", fontSize = TextSmall)
+                        }
+                    }
+                    if (apps.isNotEmpty()) {
+                        Text("${apps.size} App-Updates", fontWeight = Bold)
+                        apps.forEachIndexed { i, a ->
+                            Row(Modifier.fillMaxWidth().background(stripe(i)).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text("${a["app"].str} → ${a["version"].str}", Modifier.weight(1f))
+                                TextButton(onClick = { host.post("Update ${a["app"].str}", "$NC/action/app-update", """{"app":${jsonString(a["app"].str)}}""") }) { Text("Update") }
+                            }
+                        }
+                        Button(onClick = { host.post("App-Updates", "$NC/action/app-update-all") }) { Text("Alle Apps aktualisieren") }
+                    }
                 }
             }
             SectionCard("Einrichtungsprüfung") {
                 Loader(Unit, { api.getJson("$NC/setupchecks") }) { checks, _ ->
-                    var any = false
+                    var n = 0
                     checks.obj.forEach { (cat, items) ->
                         items.obj.values.forEach { c ->
                             val sev = c["severity"].str
                             if (sev != "success" && sev != "info") {
-                                any = true
-                                Text("$cat · ${c["name"].str}", fontWeight = Bold, color = if (sev == "error") StatusBad else StatusWarn)
-                                Text(c["description"].str, fontSize = 12.sp)
+                                Column(Modifier.fillMaxWidth().background(stripe(n++)).padding(4.dp)) {
+                                    Text("$cat · ${c["name"].str}", fontWeight = Bold, color = if (sev == "error") StatusBad else StatusWarn)
+                                    Text(c["description"].str, fontSize = TextSmall)
+                                }
                             }
                         }
                     }
-                    if (!any) Text("Keine Warnungen.", color = StatusOk)
+                    if (n == 0) Text("Keine Warnungen.", color = StatusOk)
                 }
             }
+        }
+    }
+}
+
+/** maintenance_window_start: Nextcloud runs heavy background jobs in the 4 hours after this hour (UTC). */
+@Composable
+private fun NcMaintenanceWindow(api: ApiClient, host: ActionHost) {
+    val offsetH = (currentUtcOffsetMs() / 3_600_000).toInt()
+    fun toLocal(utc: Int) = (utc + offsetH).mod(24)
+    fun toUtc(local: Int) = (local - offsetH).mod(24)
+    fun hh(h: Int) = h.toString().padStart(2, '0') + ":00"
+    Loader(host.result == null, { api.getJson("$NC/maintenance-window") }) { w, reload ->
+        val set = w["set"].bool == true
+        val utc = w["startUtc"].long?.toInt() ?: 1
+        var local by remember(w) { mutableStateOf(if (set) toLocal(utc).toString() else "") }
+        SectionCard("Wartungsfenster", actions = { RefreshButton(reload) }) {
+            KeyValues(
+                "Beginn" to if (set) "${hh(toLocal(utc))} Ortszeit (${hh(utc)} UTC)" else "nicht festgelegt",
+                "Dauer" to "4 Stunden",
+            )
+            Text("In diesem Zeitraum erledigt Nextcloud aufwendige Hintergrundjobs (z. B. Aufräumen, Vorschaubilder). " +
+                "Nextcloud speichert die Zeit in UTC; mit der Sommerzeit verschiebt sich die Ortszeit um eine Stunde.", fontSize = TextSmall)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(local, { local = it.filter(Char::isDigit).take(2) }, Modifier.weight(1f),
+                    label = { Text("Beginn (Stunde, Ortszeit)") }, singleLine = true)
+                val h = local.toIntOrNull()
+                Button(enabled = h != null && h in 0..23, onClick = {
+                    val u = toUtc(h ?: 0)
+                    host.run("Wartungsfenster", { api.putRaw("$NC/maintenance-window", """{"startUtc":$u}"""); "Beginn ${hh(h ?: 0)} Ortszeit (${hh(u)} UTC)." }, reload)
+                }) { Text("Setzen") }
+            }
+            if (set) SmallButton("Entfernen", {
+                host.run("Wartungsfenster entfernt", { api.putRaw("$NC/maintenance-window", """{"startUtc":-1}"""); "Kein Wartungsfenster mehr festgelegt." }, reload)
+            })
         }
     }
 }
@@ -133,26 +222,27 @@ private fun NcUsers(api: ApiClient, host: ActionHost, ask: (Confirm) -> Unit) {
     var adding by remember { mutableStateOf(false) }
     Loader(host.result == null, { api.getJson("$NC/users") }) { users, reload ->
         Column {
-            Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(filter, { filter = it }, Modifier.weight(1f), label = { Text("Suchen") }, singleLine = true)
-                TextButton(onClick = { adding = true }) { Text("Neu") }
+                AddButton({ adding = true }, "Benutzer anlegen")
+                RefreshButton(reload)
             }
             val list = users.obj.entries.filter { filter.isBlank() || it.key.contains(filter, true) || it.value["display_name"].str.contains(filter, true) }
             LazyColumn {
-                items(list, key = { it.key }) { (id, u) ->
+                itemsIndexed(list, key = { _, e -> e.key }) { i, (id, u) ->
                     val enabled = u["enabled"].bool != false
                     val used = u["storage"]["used"].long ?: u["quota"]["used"].long
-                    ListItem(
-                        leadingContent = { StatusDot(if (enabled) StatusOk else StatusBad) },
-                        headlineContent = { Text("${u["display_name"].str.ifBlank { id }}  ($id)") },
-                        supportingContent = {
+                    StripedItem(
+                        i,
+                        leading = { StatusDot(if (enabled) StatusOk else StatusBad) },
+                        headline = { Text("${u["display_name"].str.ifBlank { id }}  ($id)") },
+                        supporting = {
                             Text(listOf(u["email"].str, "Kontingent ${u["quota"].str.takeIf { !it.startsWith("{") } ?: u["quota"]["quota"].str}",
                                 used?.let { "belegt ${formatBytes(it)}" } ?: "", "zuletzt ${u["last_seen"].str}")
-                                .filter { it.isNotBlank() }.joinToString(" · "), fontSize = 12.sp)
+                                .filter { it.isNotBlank() }.joinToString(" · "), fontSize = TextSmall)
                         },
-                        modifier = Modifier.clickable { selected = id },
+                        onClick = { selected = id },
                     )
-                    HorizontalDivider()
                 }
             }
         }
@@ -229,18 +319,22 @@ private fun NcApps(api: ApiClient, host: ActionHost, ask: (Confirm) -> Unit) {
     var filter by remember { mutableStateOf("") }
     Loader(host.result == null, { api.getJson("$NC/apps") }) { apps, reload ->
         Column {
-            Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(filter, { filter = it }, Modifier.weight(1f), label = { Text("Suchen") }, singleLine = true)
-                TextButton(onClick = { ask(Confirm("Alle Apps aktualisieren?", "occ app:update --all") { host.post("App-Updates", "$NC/action/app-update-all") }) }) { Text("Alle aktualisieren") }
+                RefreshButton(reload)
+            }
+            Row(Modifier.padding(horizontal = 12.dp)) {
+                SmallButton("Alle Apps aktualisieren", { ask(Confirm("Alle Apps aktualisieren?", "occ app:update --all") { host.post("App-Updates", "$NC/action/app-update-all") }) })
             }
             val all = apps["enabled"].obj.map { Triple(it.key, it.value.str, true) } + apps["disabled"].obj.map { Triple(it.key, it.value.str, false) }
             LazyColumn {
-                items(all.filter { filter.isBlank() || it.first.contains(filter, true) }, key = { it.first }) { (id, ver, on) ->
+                itemsIndexed(all.filter { filter.isBlank() || it.first.contains(filter, true) }, key = { _, a -> a.first }) { i, (id, ver, on) ->
                     val body = """{"app":${jsonString(id)}}"""
-                    ListItem(
-                        headlineContent = { Text(id) },
-                        supportingContent = { Text(ver.ifBlank { "–" }, fontSize = 12.sp) },
-                        trailingContent = {
+                    StripedItem(
+                        i,
+                        headline = { Text(id) },
+                        supporting = { Text(ver.ifBlank { "–" }, fontSize = TextSmall) },
+                        trailing = {
                             Row {
                                 if (on) TextButton(onClick = { host.post("Update $id", "$NC/action/app-update", body) }) { Text("Update") }
                                 Switch(on, onCheckedChange = {
@@ -250,7 +344,6 @@ private fun NcApps(api: ApiClient, host: ActionHost, ask: (Confirm) -> Unit) {
                             }
                         },
                     )
-                    HorizontalDivider()
                 }
             }
         }

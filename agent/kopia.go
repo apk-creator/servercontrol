@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -156,6 +157,15 @@ func (s *Server) handleKopiaStatus(w http.ResponseWriter, r *http.Request) {
 	_ = json.Unmarshal([]byte(st.Stdout), &status)
 	_ = json.Unmarshal([]byte(mi.Stdout), &maint)
 	resp := map[string]any{"status": status, "maintenance": maint}
+	if m, ok := status.(map[string]any); ok {
+		if stg, ok := m["storage"].(map[string]any); ok {
+			if c, ok := stg["config"].(map[string]any); ok {
+				if p, ok := c["path"].(string); ok && filepath.IsAbs(p) {
+					resp["drive"] = driveOf(r, p)
+				}
+			}
+		}
+	}
 	if st.ExitCode != 0 {
 		resp["error"] = strings.TrimSpace(st.Stderr)
 	}
@@ -260,6 +270,8 @@ func (s *Server) handleKopiaAction(w http.ResponseWriter, r *http.Request) {
 		title += "Snapshot"
 	case "maintenance":
 		args, title = []string{"maintenance", "run", "--full"}, title+"Wartung"
+	case "quick-maintenance":
+		args, title = []string{"maintenance", "run"}, title+"Kurzwartung"
 	case "verify":
 		p := req.Percent
 		if p <= 0 || p > 100 {
@@ -295,4 +307,158 @@ func (s *Server) handleKopiaAction(w http.ResponseWriter, r *http.Request) {
 func itoa(i int) string {
 	b, _ := json.Marshal(i)
 	return string(b)
+}
+
+// driveOf finds the mount and the physical disk (model, HDD/SSD) a path lives on.
+func driveOf(r *http.Request, path string) map[string]any {
+	var best Mount
+	for _, m := range mounts() {
+		if (path == m.Mount || strings.HasPrefix(path, strings.TrimSuffix(m.Mount, "/")+"/")) && len(m.Mount) > len(best.Mount) {
+			best = m
+		}
+	}
+	out := map[string]any{"mount": best.Mount, "device": best.Device, "total": best.Total, "used": best.Used, "free": best.Free}
+	if strings.HasPrefix(best.Device, "/dev/") {
+		// -s: walk up from the partition / LUKS mapping to the disk (sysfs only, does not wake the disk)
+		res := run(r.Context(), 10*time.Second, nil, "lsblk", "-s", "-n", "-P", "-o", "NAME,TYPE,MODEL,ROTA", best.Device)
+		for _, l := range strings.Split(res.Stdout, "\n") {
+			if strings.Contains(l, `TYPE="disk"`) {
+				kv := parsePairs(l)
+				out["disk"] = "/dev/" + kv["NAME"]
+				out["model"] = strings.TrimSpace(kv["MODEL"])
+				out["rotational"] = kv["ROTA"] == "1"
+				break
+			}
+		}
+	}
+	return out
+}
+
+func parsePairs(l string) map[string]string {
+	out := map[string]string{}
+	for _, m := range regexp.MustCompile(`([A-Z]+)="([^"]*)"`).FindAllStringSubmatch(l, -1) {
+		out[m[1]] = m[2]
+	}
+	return out
+}
+
+var sourceRe = regexp.MustCompile(`^[A-Za-z0-9._-]+@[A-Za-z0-9._-]+:/[^\x00]*$`)
+var timesRe = regexp.MustCompile(`^([0-2]?[0-9]:[0-5][0-9])(,[0-2]?[0-9]:[0-5][0-9])*$`)
+var cronRe = regexp.MustCompile(`^[0-9*/,\- ;A-Za-z]{1,200}$`)
+
+// GET /api/kopia/repos/{repo}/schedule?source=user@host:/path – effective policy of a source
+func (s *Server) handleKopiaSchedule(w http.ResponseWriter, r *http.Request) {
+	k, bin, ok := s.kopiaRepo(w, r)
+	if !ok {
+		return
+	}
+	src := r.URL.Query().Get("source")
+	if !sourceRe.MatchString(src) {
+		writeErr(w, 400, "invalid source")
+		return
+	}
+	res := run(r.Context(), 30*time.Second, kopiaEnv(k), bin, kopiaArgs(k, "policy", "show", "--json", src)...)
+	var p any
+	if json.Unmarshal([]byte(res.Stdout), &p) != nil {
+		sendResult(w, res)
+		return
+	}
+	writeJSON(w, 200, p)
+}
+
+// POST /api/kopia/repos/{repo}/schedule – snapshot times/interval and retention of a source
+func (s *Server) handleKopiaScheduleSet(w http.ResponseWriter, r *http.Request) {
+	k, bin, ok := s.kopiaRepo(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Source        string            `json:"source"`
+		Times         string            `json:"times"`   // "01:00,13:00", "" = inherit
+		Crontab       string            `json:"crontab"` // "" = inherit
+		IntervalHours *int              `json:"intervalHours"`
+		Keep          map[string]string `json:"keep"` // latest/hourly/daily/weekly/monthly/annual → number or "inherit"
+	}
+	if err := readJSON(r, &req); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	if !sourceRe.MatchString(req.Source) {
+		writeErr(w, 400, "invalid source")
+		return
+	}
+	args := []string{"policy", "set", req.Source}
+	switch t := strings.ReplaceAll(req.Times, " ", ""); {
+	case t == "":
+		args = append(args, "--snapshot-time=inherit")
+	case timesRe.MatchString(t):
+		args = append(args, "--snapshot-time="+t)
+	default:
+		writeErr(w, 400, "times: HH:MM, comma separated")
+		return
+	}
+	switch c := strings.TrimSpace(req.Crontab); {
+	case c == "":
+		args = append(args, "--snapshot-time-crontab=inherit")
+	case cronRe.MatchString(c):
+		args = append(args, "--snapshot-time-crontab="+c)
+	default:
+		writeErr(w, 400, "invalid crontab expression")
+		return
+	}
+	if req.IntervalHours != nil {
+		h := *req.IntervalHours
+		if h < 0 || h > 24*31 {
+			writeErr(w, 400, "invalid interval")
+			return
+		}
+		args = append(args, "--snapshot-interval="+strconv.Itoa(h)+"h")
+	}
+	for _, key := range []string{"latest", "hourly", "daily", "weekly", "monthly", "annual"} {
+		v, ok := req.Keep[key]
+		if !ok {
+			continue
+		}
+		v = strings.TrimSpace(v)
+		if v == "" {
+			v = "inherit"
+		}
+		if v != "inherit" {
+			if n, err := strconv.Atoi(v); err != nil || n < 0 || n > 10000 {
+				writeErr(w, 400, "keep-"+key+": number or empty")
+				return
+			}
+		}
+		args = append(args, "--keep-"+key+"="+v)
+	}
+	logf("kopia %s: policy set %v", k.ID, args[3:])
+	sendResult(w, run(r.Context(), 60*time.Second, kopiaEnv(k), bin, kopiaArgs(k, args...)...))
+}
+
+// POST /api/kopia/repos/{repo}/maintenance-schedule
+func (s *Server) handleKopiaMaintSet(w http.ResponseWriter, r *http.Request) {
+	k, bin, ok := s.kopiaRepo(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		QuickEnabled bool `json:"quickEnabled"`
+		FullEnabled  bool `json:"fullEnabled"`
+		QuickHours   int  `json:"quickHours"`
+		FullHours    int  `json:"fullHours"`
+	}
+	if err := readJSON(r, &req); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	args := []string{"maintenance", "set",
+		"--enable-quick=" + strconv.FormatBool(req.QuickEnabled), "--enable-full=" + strconv.FormatBool(req.FullEnabled)}
+	if req.QuickHours > 0 && req.QuickHours <= 24*31 {
+		args = append(args, "--quick-interval="+strconv.Itoa(req.QuickHours)+"h")
+	}
+	if req.FullHours > 0 && req.FullHours <= 24*366 {
+		args = append(args, "--full-interval="+strconv.Itoa(req.FullHours)+"h")
+	}
+	logf("kopia %s: %v", k.ID, args)
+	sendResult(w, run(r.Context(), 60*time.Second, kopiaEnv(k), bin, kopiaArgs(k, args...)...))
 }

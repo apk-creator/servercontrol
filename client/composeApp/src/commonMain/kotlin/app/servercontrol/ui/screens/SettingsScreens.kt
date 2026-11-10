@@ -1,5 +1,6 @@
 package app.servercontrol.ui.screens
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -89,7 +90,7 @@ fun NextcloudSetup(api: ApiClient, current: JsonElement?, onSaved: () -> Unit) {
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         SectionCard("Nextcloud verbinden") {
-            Text("ServerControl steuert Nextcloud über occ auf dem Server. Wie ist Nextcloud installiert?", fontSize = 13.sp)
+            Text("ServerControl steuert Nextcloud über occ auf dem Server. Wie ist Nextcloud installiert?", fontSize = TextSmall)
             listOf("Klassisch (Webserver + PHP)", "Docker-Container", "Snap", "Eigener Befehl").forEachIndexed { i, t ->
                 Row(Modifier.fillMaxWidth().selectable(mode == i, onClick = { mode = i }).padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                     RadioButton(mode == i, { mode = i }); Text(t)
@@ -100,7 +101,7 @@ fun NextcloudSetup(api: ApiClient, current: JsonElement?, onSaved: () -> Unit) {
                 1 -> OutlinedTextField(container, { container = it }, Modifier.fillMaxWidth(), label = { Text("Container-Name (AIO: nextcloud-aio-nextcloud)") }, singleLine = true)
                 3 -> OutlinedTextField(custom, { custom = it }, Modifier.fillMaxWidth(), label = { Text("occ-Befehl") }, singleLine = true)
             }
-            Text("Befehl: " + occ().joinToString(" "), fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+            Text("Befehl: " + occ().joinToString(" "), fontFamily = FontFamily.Monospace, fontSize = TextSmall)
             ButtonRow {
                 SmallButton("Testen", {
                     scope.launch {
@@ -133,10 +134,10 @@ fun ImmichSetup(api: ApiClient, current: JsonElement?, onSaved: () -> Unit) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         SectionCard("Immich verbinden") {
             Text("Adresse von Immich aus Sicht des Servers (meist http://127.0.0.1:2283) und ein API-Schlüssel eines Admin-Kontos " +
-                "(Immich → Kontoeinstellungen → API-Schlüssel, Rechte: alle oder server.*, job.*, adminUser.*, library.*).", fontSize = 13.sp)
+                "(Immich → Kontoeinstellungen → API-Schlüssel, Rechte: alle oder server.*, job.*, adminUser.*, library.*).", fontSize = TextSmall)
             OutlinedTextField(url, { url = it }, Modifier.fillMaxWidth(), label = { Text("Immich-URL") }, singleLine = true)
             SecretField(key, { key = it }, if (current["hasApiKey"].bool == true) "API-Schlüssel (leer = gespeicherten behalten)" else "API-Schlüssel")
-            Text("Der Schlüssel wird nur auf dem Server gespeichert (/etc/servercontrol/immich.key, nur root).", fontSize = 12.sp)
+            Text("Der Schlüssel wird nur auf dem Server gespeichert (/etc/servercontrol/immich.key, nur root).", fontSize = TextSmall)
             ButtonRow {
                 SmallButton("Testen", {
                     scope.launch {
@@ -168,13 +169,15 @@ fun AgentScreen(state: app.servercontrol.AppState, api: ApiClient) {
         var repo by remember(cfg) { mutableStateOf(cfg["update"]["repo"].str) }
         var token by remember(cfg) { mutableStateOf("") }
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-            SectionCard("Agent") {
-                KeyValue("Agent-Version", cfg["version"].str)
-                KeyValue("App-Version", APP_VERSION)
-                KeyValue("Nextcloud", if (cfg["nextcloud"]["enabled"].bool == true) "verbunden" else "nicht eingerichtet")
-                KeyValue("Immich", if (cfg["immich"]["enabled"].bool == true) "verbunden" else "nicht eingerichtet")
-                KeyValue("Kopia-Repos", cfg["kopiaCount"].str)
-                KeyValue("Root-Befehle", if (cfg["allowShell"].bool == true) "erlaubt (allowShell)" else "aus")
+            SectionCard("Agent", actions = { RefreshButton(reload) }) {
+                KeyValues(
+                    "Agent-Version" to cfg["version"].str,
+                    "App-Version" to APP_VERSION,
+                    "Nextcloud" to if (cfg["nextcloud"]["enabled"].bool == true) "verbunden" else "nicht eingerichtet",
+                    "Immich" to if (cfg["immich"]["enabled"].bool == true) "verbunden" else "nicht eingerichtet",
+                    "Kopia-Repos" to cfg["kopiaCount"].str,
+                    "Root-Befehle" to if (cfg["allowShell"].bool == true) "erlaubt (allowShell)" else "aus",
+                )
             }
             SectionCard("Agent aktualisieren") {
                 ButtonRow {
@@ -198,13 +201,12 @@ fun AgentScreen(state: app.servercontrol.AppState, api: ApiClient) {
                 }
                 check?.let { c ->
                     val err = c["error"].str
-                    if (err.isNotBlank()) Text(err, color = StatusBad, fontSize = 13.sp)
+                    if (err.isNotBlank()) Text(err, color = StatusBad, fontSize = TextSmall)
                     else {
-                        KeyValue("Installiert", c["current"].str)
-                        KeyValue("Neuestes Release", c["latest"].str + "  (" + c["publishedAt"].str.take(10) + ")")
+                        KeyValues("Installiert" to c["current"].str, "Neuestes Release" to c["latest"].str + "  (" + c["publishedAt"].str.take(10) + ")")
                         if (c["newer"].bool == true && c["hasAsset"].bool == true) {
                             Text("Update verfügbar.", color = StatusWarn, fontWeight = Bold)
-                            c["notes"].str.takeIf { it.isNotBlank() }?.let { Text(it.take(1500), fontSize = 12.sp) }
+                            c["notes"].str.takeIf { it.isNotBlank() }?.let { Text(it.take(1500), fontSize = TextSmall) }
                             Button(onClick = {
                                 confirm = Confirm("Agent auf ${c["latest"].str} aktualisieren?",
                                     "Der Agent lädt das Release von GitHub, ersetzt sich selbst und startet neu. Danach musst du dich erneut anmelden.") {
@@ -222,7 +224,7 @@ fun AgentScreen(state: app.servercontrol.AppState, api: ApiClient) {
             AppUpdateCard(state, check)
             DevicesCard(api)
             SectionCard("Update-Quelle") {
-                Text("Für ein privates Repository braucht der Server ein GitHub-Token mit Lesezugriff (Fine-grained Token: nur dieses Repository, Berechtigung „Contents: Read-only“).", fontSize = 13.sp)
+                Text("Für ein privates Repository braucht der Server ein GitHub-Token mit Lesezugriff (Fine-grained Token: nur dieses Repository, Berechtigung „Contents: Read-only“).", fontSize = TextSmall)
                 OutlinedTextField(repo, { repo = it.trim() }, Modifier.fillMaxWidth(), label = { Text("Repository (owner/name)") }, singleLine = true)
                 SecretField(token, { token = it }, if (cfg["update"]["hasToken"].bool == true) "GitHub-Token (leer = behalten)" else "GitHub-Token")
                 ButtonRow {
@@ -248,37 +250,37 @@ private fun AppUpdateCard(state: app.servercontrol.AppState, check: JsonElement?
     val pattern = appUpdateAssetPattern ?: return
     val progress = state.appUpdate
     SectionCard("App aktualisieren") {
-        KeyValue("Installiert", APP_VERSION)
+        KeyValue("Installiert", APP_VERSION, 0)
         if (progress != null) {
             if (progress.running) {
-                Text("Lädt ${progress.asset} – läuft auch im Hintergrund weiter.", fontSize = 13.sp)
+                Text("Lädt ${progress.asset} – läuft auch im Hintergrund weiter.", fontSize = TextSmall)
                 if (progress.total > 0) {
                     LinearProgressIndicator(progress = { (progress.done.toFloat() / progress.total).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
                 } else {
                     LinearProgressIndicator(Modifier.fillMaxWidth())
                 }
-                Text("${formatBytes(progress.done)}${if (progress.total > 0) " von ${formatBytes(progress.total)}" else ""}", fontSize = 12.sp)
+                Text("${formatBytes(progress.done)}${if (progress.total > 0) " von ${formatBytes(progress.total)}" else ""}", fontSize = TextSmall)
                 SmallButton("Abbrechen", { state.cancelAppUpdate() })
             } else {
                 Text(
                     if (progress.ok) progress.message ?: "Fertig." else "Update fehlgeschlagen: ${progress.message}",
-                    color = if (progress.ok) StatusOk else StatusBad, fontSize = 13.sp,
+                    color = if (progress.ok) StatusOk else StatusBad, fontSize = TextSmall,
                 )
                 SmallButton("OK", { state.dismissAppUpdate() })
             }
             return@SectionCard
         }
         if (check == null) {
-            Text("Oben „Nach Updates suchen“ tippen.", fontSize = 13.sp)
+            Text("Oben „Nach Updates suchen“ tippen.", fontSize = TextSmall)
             return@SectionCard
         }
         val latest = check["latest"].str
         val asset = check["assets"].arr.map { it["name"].str }.firstOrNull { pattern.matches(it) }
-        if (latest.isNotBlank()) KeyValue("Neuestes Release", latest)
+        if (latest.isNotBlank()) KeyValue("Neuestes Release", latest, 1)
         val newer = latest.isNotBlank() && compareVersions(latest, APP_VERSION) > 0
         when {
             latest.isBlank() -> {}
-            asset == null -> Text("Im Release ist kein Paket für diese Plattform.", color = StatusWarn, fontSize = 13.sp)
+            asset == null -> Text("Im Release ist kein Paket für diese Plattform.", color = StatusWarn, fontSize = TextSmall)
             !newer -> Text("Die App ist aktuell.", color = StatusOk)
             else -> Button(onClick = { state.startAppUpdate(asset) }) { Text("App auf $latest aktualisieren") }
         }
@@ -293,19 +295,19 @@ private fun DevicesCard(api: ApiClient) {
     var reload by remember { mutableStateOf(0) }
     var askRevoke by remember { mutableStateOf<Pair<String, String>?>(null) }
     LaunchedEffect(reload) { list = runCatching { api.getJson("/api/devices") }.getOrNull() }
-    SectionCard("Angemeldete Geräte") {
-        Text("Diese Geräte bleiben angemeldet, auch wenn die App lange im Hintergrund war. „Abmelden“ im Menü entfernt das eigene Gerät.", fontSize = 13.sp)
+    SectionCard("Angemeldete Geräte", actions = { RefreshButton { reload++ } }) {
+        Text("Diese Geräte bleiben angemeldet, auch wenn die App lange im Hintergrund war. „Abmelden“ im Menü entfernt das eigene Gerät.", fontSize = TextSmall)
         val items = list?.arr
         if (items == null) {
-            Text("…", fontSize = 13.sp)
+            Text("…", fontSize = TextSmall)
         } else if (items.isEmpty()) {
-            Text("Keine.", fontSize = 13.sp)
+            Text("Keine.", fontSize = TextSmall)
         } else {
-            items.forEach { d ->
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            items.forEachIndexed { i, d ->
+                Row(Modifier.fillMaxWidth().background(stripe(i)).padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text(d["name"].str + if (d["current"].bool == true) "  (dieses Gerät)" else "", fontWeight = Bold, fontSize = 14.sp)
-                        Text("zuletzt ${d["lastUsed"].str.take(10)} · seit ${d["created"].str.take(10)}", fontSize = 12.sp)
+                        Text(d["name"].str + if (d["current"].bool == true) "  (dieses Gerät)" else "", fontWeight = Bold, fontSize = TextSmall)
+                        Text("zuletzt ${d["lastUsed"].str.take(10)} · seit ${d["created"].str.take(10)}", fontSize = TextSmall)
                     }
                     if (d["current"].bool != true) SmallButton("Entfernen", { askRevoke = d["id"].str to d["name"].str })
                 }

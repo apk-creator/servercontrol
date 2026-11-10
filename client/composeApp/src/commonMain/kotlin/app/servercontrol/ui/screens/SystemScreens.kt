@@ -1,5 +1,6 @@
 package app.servercontrol.ui.screens
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -12,6 +13,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PowerSettingsNew
+import androidx.compose.material.icons.filled.RestartAlt
+import androidx.compose.ui.graphics.Color
+import kotlin.math.roundToInt
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -42,11 +50,25 @@ private fun enc(s: String) = s.replace("%", "%25").replace(" ", "%20").replace("
 
 // ======================= Overview =======================
 
+private fun two(n: Long) = n.toString().padStart(2, '0')
+
+/** epoch millis → "HH:mm" in the device's time zone */
+fun formatClock(ms: Long): String {
+    val t = ((ms + currentUtcOffsetMs()) / 1000).mod(86400L)
+    return "${two(t / 3600)}:${two((t % 3600) / 60)}"
+}
+
+private fun c(v: Double) = "${v.roundToInt()}"
+private fun tempColor(max: Double) = when { max >= 85 -> StatusBad; max >= 70 -> StatusWarn; else -> StatusOk }
+private fun tempLine(t: TempStats) = "min ${c(t.min)} · Ø ${c(t.avg)} · max ${c(t.max)} °C"
+
 @Composable
 fun OverviewScreen(api: ApiClient, goTo: (Section) -> Unit) {
     var ov by remember { mutableStateOf<Overview?>(null) }
+    var hist by remember { mutableStateOf<MetricHistory?>(null) }
     var err by remember { mutableStateOf<String?>(null) }
-    var confirm by remember { mutableStateOf<Confirm?>(null) }
+    var power by remember { mutableStateOf<String?>(null) } // "reboot" / "poweroff"
+    var popup by remember { mutableStateOf<String?>(null) } // "cores" / "board" / "hdd"
     val host = rememberActionHost { api }
     LaunchedEffect(api) {
         while (true) {
@@ -54,9 +76,28 @@ fun OverviewScreen(api: ApiClient, goTo: (Section) -> Unit) {
             delay(5_000)
         }
     }
+    LaunchedEffect(api) {
+        while (true) {
+            runCatching { hist = api.get("/api/system/history") }
+            delay(30_000)
+        }
+    }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+        // restart / shut down: two big fields at the very top
+        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            PowerTile("Neustart", Icons.Default.RestartAlt, Modifier.weight(1f)) { power = "reboot" }
+            PowerTile("Herunterfahren", Icons.Default.PowerSettingsNew, Modifier.weight(1f)) { power = "poweroff" }
+        }
         err?.let { ErrorCard(it) }
         val o = ov ?: run { LinearProgressIndicator(Modifier.fillMaxWidth()); return@Column }
+        o.scheduledPower?.takeIf { it.at > 0 }?.let { sp ->
+            SectionCard(collapsible = false) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("${if (sp.mode == "poweroff") "Herunterfahren" else "Neustart"} geplant um ${formatClock(sp.at)}", Modifier.weight(1f), color = StatusWarn, fontWeight = Bold)
+                    SmallButton("Abbrechen", { host.post("Abgebrochen", "/api/system/power/cancel") })
+                }
+            }
+        }
         if (o.rebootRequired || o.failedUnits > 0) {
             SectionCard("Hinweise") {
                 if (o.rebootRequired) Text("Neustart erforderlich (nach Updates).", color = StatusWarn)
@@ -67,49 +108,136 @@ fun OverviewScreen(api: ApiClient, goTo: (Section) -> Unit) {
             }
         }
         SectionCard("System") {
-            KeyValue("Hostname", o.hostname)
-            KeyValue("Betriebssystem", o.os)
-            KeyValue("Kernel", o.kernel)
-            KeyValue("CPU", "${o.cpuModel} (${o.cpuCores} Threads)")
-            KeyValue("Laufzeit", formatDuration(o.uptimeSeconds))
-            KeyValue("Last (1/5/15)", o.load.joinToString(" / "))
+            var i = 0
+            KeyValue("Hostname", o.hostname, i++)
+            KeyValue("Betriebssystem", o.os, i++)
+            KeyValue("Kernel", o.kernel, i++)
+            KeyValue("CPU", "${o.cpuModel} (${o.cpuCores} Threads)", i++)
+            KeyValue("Laufzeit", formatDuration(o.uptimeSeconds), i++)
+            if (o.tempBoard.count > 0) {
+                KeyValue("Mainboard", tempLine(o.tempBoard), i++, tempColor(o.tempBoard.max)) { popup = "board" }
+            }
+            if (o.hddTemps.isNotEmpty()) {
+                val v = when {
+                    o.tempDisks.count == 0 -> "alle im Standby"
+                    else -> tempLine(o.tempDisks) + if (o.hddStandby > 0) "  (${o.hddStandby} im Standby)" else ""
+                }
+                KeyValue("HDDs", v, i++, if (o.tempDisks.count > 0) tempColor(o.tempDisks.max) else Color.Unspecified) { popup = "hdd" }
+            }
         }
         SectionCard("Auslastung") {
-            UsageBar("CPU", (o.cpuPercent * 10).toLong(), 1000, "${(o.cpuPercent * 10).toInt() / 10.0} %")
+            Column(Modifier.clickable { popup = "cores" }) {
+                UsageBar("CPU  ›", (o.cpuPercent * 10).toLong(), 1000, "${(o.cpuPercent * 10).roundToInt() / 10.0} %")
+            }
             val used = o.memTotal - o.memAvailable
             UsageBar("Arbeitsspeicher", used, o.memTotal, "${formatBytes(used)} / ${formatBytes(o.memTotal)}")
             if (o.swapTotal > 0) {
                 val su = o.swapTotal - o.swapFree
                 UsageBar("Swap", su, o.swapTotal, "${formatBytes(su)} / ${formatBytes(o.swapTotal)}")
             }
+            UsageBar("Festplatten-I/O", (o.disk.busy * 10).toLong(), 1000,
+                "${o.disk.busy.roundToInt()} % · ↓ ${formatBytes(o.disk.read.toLong())}/s ↑ ${formatBytes(o.disk.write.toLong())}/s")
         }
-        if (o.temperatures.isNotEmpty()) SectionCard("Temperaturen") {
-            o.temperatures.sortedBy { it.chip + it.label }.forEach { t ->
-                Row {
-                    Text("${t.chip} · ${t.label}", Modifier.weight(1f))
-                    Text("${(t.celsius * 10).toInt() / 10.0} °C",
-                        color = when { t.celsius >= 85 -> StatusBad; t.celsius >= 70 -> StatusWarn; else -> StatusOk })
-                }
+        if (o.filesystems.isNotEmpty()) SectionCard("Festplatten") {
+            o.filesystems.forEach { m ->
+                UsageBar(m.mount, m.used, m.total, "${formatBytes(m.used)} / ${formatBytes(m.total)}")
             }
         }
-        SectionCard("Energie") {
-            ButtonRow {
-                SmallButton("Neustart", {
-                    confirm = Confirm("Server neu starten?", "${o.hostname} wird in 5 Sekunden neu gestartet. Die Verbindung bricht ab.") {
-                        host.post("Neustart", "/api/system/power/reboot")
-                    }
-                })
-                SmallButton("Herunterfahren", {
-                    confirm = Confirm("Server herunterfahren?", "${o.hostname} wird ausgeschaltet. Ein Einschalten aus der Ferne ist danach nicht möglich (außer per Wake-on-LAN).") {
-                        host.post("Herunterfahren", "/api/system/power/poweroff")
-                    }
-                })
+        hist?.let { h ->
+            val pts = h.points
+            val cap = 3600 / h.intervalSeconds.coerceAtLeast(1)
+            val strong = MaterialTheme.colorScheme.onSurface
+            val weak = MaterialTheme.colorScheme.outline
+            SectionCard("Verlauf (1 Stunde)") {
+                ChartBlock("CPU", "${o.cpuPercent.roundToInt()} %", listOf(ChartSeries(pts.map { it.cpu }, strong, fill = true)), cap, 100.0)
+                ChartBlock("Arbeitsspeicher", "${pts.lastOrNull()?.mem?.roundToInt() ?: 0} %", listOf(ChartSeries(pts.map { it.mem }, strong, fill = true)), cap, 100.0)
+                ChartBlock("Festplatten  (lesen ━ / schreiben ━ grau)", "↓ ${formatBytes(o.disk.read.toLong())}/s  ↑ ${formatBytes(o.disk.write.toLong())}/s",
+                    listOf(ChartSeries(pts.map { it.diskRead }, strong), ChartSeries(pts.map { it.diskWrite }, weak)), cap)
+                ChartBlock("Netzwerk  (empfangen ━ / senden ━ grau)", "↓ ${formatBytes(o.net.rx.toLong())}/s  ↑ ${formatBytes(o.net.tx.toLong())}/s",
+                    listOf(ChartSeries(pts.map { it.netRx }, strong), ChartSeries(pts.map { it.netTx }, weak)), cap)
             }
         }
         Spacer(Modifier.heightIn(min = 24.dp))
     }
-    ConfirmDialog(confirm) { confirm = null }
+    val o = ov
+    when (popup) {
+        "cores" -> if (o != null) AppDialog(
+            onDismissRequest = { popup = null },
+            title = { Text("CPU-Kerne") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("${o.cpuModel} · gesamt ${o.cpuPercent.roundToInt()} %", fontSize = TextSmall)
+                    if (o.cores.isEmpty()) Text("Noch keine Messwerte – gleich noch einmal öffnen.")
+                    o.cores.forEachIndexed { i, v ->
+                        UsageBar("Kern ${i + 1}", (v * 10).toLong(), 1000, "${v.roundToInt()} %")
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { popup = null }) { Text("Schließen") } },
+        )
+        "board" -> if (o != null) AppDialog(
+            onDismissRequest = { popup = null },
+            title = { Text("Temperaturen Mainboard") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    o.temperatures.filter { it.chip != "drivetemp" && it.chip != "nvme" }.sortedBy { it.chip + it.label }.forEachIndexed { i, t ->
+                        KeyValue("${t.chip} · ${t.label}", "${(t.celsius * 10).roundToInt() / 10.0} °C", i, tempColor(t.celsius))
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { popup = null }) { Text("Schließen") } },
+        )
+        "hdd" -> if (o != null) AppDialog(
+            onDismissRequest = { popup = null },
+            title = { Text("Temperaturen HDDs") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    Text("Schlafende Platten werden nicht geweckt; für sie gilt der letzte gemessene Wert.", fontSize = TextSmall)
+                    Spacer(Modifier.heightIn(min = 6.dp))
+                    o.hddTemps.forEachIndexed { i, t ->
+                        KeyValue("${t.device.removePrefix("/dev/")} · ${t.model}",
+                            (if (t.celsius > 0) "${c(t.celsius)} °C" else "–") + if (t.standby) "  (Standby)" else "",
+                            i, if (t.celsius > 0) tempColor(t.celsius) else Color.Unspecified)
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { popup = null }) { Text("Schließen") } },
+        )
+    }
+    power?.let { act ->
+        val label = if (act == "reboot") "Neustart" else "Herunterfahren"
+        AppDialog(
+            onDismissRequest = { power = null },
+            title = { Text(if (act == "reboot") "Server neu starten?" else "Server herunterfahren?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        if (act == "reboot") "${o?.hostname ?: "Der Server"} startet neu. Die Verbindung bricht kurz ab."
+                        else "${o?.hostname ?: "Der Server"} wird ausgeschaltet. Einschalten aus der Ferne geht danach nur per Wake-on-LAN.",
+                    )
+                    listOf(0 to "Sofort", 1 to "In 1 Minute", 5 to "In 5 Minuten").forEach { (min, text) ->
+                        Button(onClick = {
+                            power = null
+                            host.post(label, "/api/system/power/$act?delay=$min")
+                        }, modifier = Modifier.fillMaxWidth()) { Text(text) }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { power = null }) { Text("Abbrechen") } },
+        )
+    }
     ActionResultDialog(host, api)
+}
+
+@Composable
+private fun PowerTile(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, modifier: Modifier, onClick: () -> Unit) {
+    Card(onClick = onClick, modifier = modifier.heightIn(min = 76.dp)) {
+        Column(Modifier.fillMaxWidth().padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(icon, null, Modifier.size(28.dp))
+            Spacer(Modifier.heightIn(min = 6.dp))
+            Text(label, fontWeight = Bold)
+        }
+    }
 }
 
 // ======================= Services =======================
@@ -123,8 +251,8 @@ fun ServicesScreen(api: ApiClient) {
         Column(Modifier.fillMaxSize()) {
             Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(filter, { filter = it }, Modifier.weight(1f), label = { Text("Suchen") }, singleLine = true)
-                Spacer(Modifier.width(8.dp))
-                SmallButton("Neu laden", reload)
+                Spacer(Modifier.width(4.dp))
+                RefreshButton(reload)
             }
             Row(Modifier.padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf("Alle", "Aktiv", "Fehler").forEachIndexed { i, t ->
@@ -136,14 +264,14 @@ fun ServicesScreen(api: ApiClient) {
                     when (mode) { 1 -> it.active == "active"; 2 -> it.active == "failed"; else -> true }
             }
             LazyColumn {
-                items(shown, key = { it.unit }) { u ->
-                    ListItem(
-                        leadingContent = { StatusDot(when (u.active) { "active" -> StatusOk; "failed" -> StatusBad; else -> MaterialTheme.colorScheme.outline }) },
-                        headlineContent = { Text(u.unit.removeSuffix(".service"), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                        supportingContent = { Text("${u.description}\n${u.active}/${u.sub}" + (u.enabled?.let { " · $it" } ?: ""), maxLines = 2) },
-                        modifier = Modifier.clickable { selected = u.unit },
+                itemsIndexed(shown, key = { _, u -> u.unit }) { i, u ->
+                    StripedItem(
+                        i,
+                        leading = { StatusDot(when (u.active) { "active" -> StatusOk; "failed" -> StatusBad; else -> MaterialTheme.colorScheme.outline }) },
+                        headline = { Text(u.unit.removeSuffix(".service"), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        supporting = { Text("${u.description}\n${u.active}/${u.sub}" + (u.enabled?.let { " · $it" } ?: ""), maxLines = 2) },
+                        onClick = { selected = u.unit },
                     )
-                    HorizontalDivider()
                 }
             }
         }
@@ -167,16 +295,18 @@ private fun ServiceDialog(api: ApiClient, unit: String, onDismiss: () -> Unit) {
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 val p = detail["properties"]
-                KeyValue("Zustand", "${p["ActiveState"].str} / ${p["SubState"].str}")
-                KeyValue("Autostart", p["UnitFileState"].str)
-                KeyValue("PID", p["MainPID"].str)
-                p["MemoryCurrent"].long?.takeIf { it < Long.MAX_VALUE / 2 }?.let { KeyValue("Speicher", formatBytes(it)) }
-                KeyValue("Neustarts", p["NRestarts"].str)
+                KeyValues(
+                    "Zustand" to "${p["ActiveState"].str} / ${p["SubState"].str}",
+                    "Autostart" to p["UnitFileState"].str,
+                    "PID" to p["MainPID"].str,
+                    p["MemoryCurrent"].long?.takeIf { it < Long.MAX_VALUE / 2 }?.let { "Speicher" to formatBytes(it) },
+                    "Neustarts" to p["NRestarts"].str,
+                )
                 ButtonRow {
                     SmallButton("Start", { act("start", "Start") })
                     SmallButton("Neustart", { act("restart", "Neustart") })
                     SmallButton("Stopp", { confirm = Confirm("$unit stoppen?", "Der Dienst wird angehalten.") { act("stop", "Stopp") } })
-                    SmallButton("Neu laden", { act("reload", "Reload") })
+                    SmallButton("Konfiguration neu laden", { act("reload", "Reload") })
                     SmallButton("Autostart an", { act("enable", "Aktivieren") })
                     SmallButton("Autostart aus", { confirm = Confirm("Autostart deaktivieren?", "$unit startet beim nächsten Boot nicht mehr.") { act("disable", "Deaktivieren") } })
                     if (p["ActiveState"].str == "failed") SmallButton("Fehler zurücksetzen", { act("reset-failed", "Zurücksetzen") })
@@ -198,6 +328,7 @@ fun ContainersScreen(api: ApiClient) {
     var logs by remember { mutableStateOf<Pair<String, String>?>(null) }
     var confirm by remember { mutableStateOf<Confirm?>(null) }
     Loader(Unit, { api.getJson("/api/containers") }) { list, reload ->
+        ListHeader("${list.arr.size} Container") { RefreshButton(reload) }
         if (list.arr.isEmpty()) Text("Keine Container gefunden (Docker/Podman nicht installiert oder keine Container).", Modifier.padding(16.dp))
         LazyColumn {
             items(list.arr) { c ->
@@ -208,8 +339,7 @@ fun ContainersScreen(api: ApiClient) {
                         StatusDot(if (running) StatusOk else StatusBad); Spacer(Modifier.width(8.dp))
                         Text(c["Status"].str)
                     }
-                    Text(c["Image"].str, style = MaterialTheme.typography.bodySmall)
-                    if (running) Text("CPU ${c["CPUPerc"].str} · RAM ${c["MemUsage"].str}", style = MaterialTheme.typography.bodySmall)
+                    KeyValues("Image" to c["Image"].str, if (running) "Last" to "CPU ${c["CPUPerc"].str} · RAM ${c["MemUsage"].str}" else null)
                     ButtonRow {
                         if (!running) SmallButton("Start", { host.post("Start $name", "/api/containers/${enc(name)}/start", after = reload) })
                         if (running) SmallButton("Neustart", { host.post("Neustart $name", "/api/containers/${enc(name)}/restart", after = reload) })
@@ -260,12 +390,12 @@ fun LogsScreen(api: ApiClient) {
         Loader(query, { api.get<List<LogEntry>>("/api/system/logs?$query") }) { entries, _ ->
             if (entries.isEmpty()) Text("Keine Einträge.", Modifier.padding(16.dp))
             LazyColumn(Modifier.fillMaxSize().padding(horizontal = 8.dp), reverseLayout = true) {
-                items(entries.reversed()) { e ->
+                itemsIndexed(entries.reversed()) { i, e ->
                     val color = when (e.priority.toIntOrNull() ?: 6) { in 0..3 -> StatusBad; 4 -> StatusWarn; else -> MaterialTheme.colorScheme.onSurface }
                     Text(
                         "${formatTime(e.time)}  ${e.ident.ifBlank { e.unit }}: ${e.message}",
-                        color = color, fontFamily = FontFamily.Monospace, fontSize = 11.sp, lineHeight = 14.sp,
-                        modifier = Modifier.padding(vertical = 1.dp),
+                        color = color, fontFamily = FontFamily.Monospace, fontSize = TextSmall, lineHeight = LineSmall,
+                        modifier = Modifier.fillMaxWidth().background(stripe(i)).padding(horizontal = 4.dp, vertical = 2.dp),
                     )
                 }
             }
@@ -305,8 +435,7 @@ fun StorageScreen(api: ApiClient) {
     var smartDev by remember { mutableStateOf<String?>(null) }
     Loader(Unit, { api.getJson("/api/system/storage") }) { data, reload ->
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-            Row(Modifier.padding(horizontal = 12.dp)) { Spacer(Modifier.weight(1f)); SmallButton("Neu laden", reload) }
-            SectionCard("Dateisysteme") {
+            SectionCard("Dateisysteme", actions = { RefreshButton(reload) }) {
                 AppJson.decodeFromJsonElement<List<MountInfo>>(data["mounts"] ?: kotlinx.serialization.json.JsonArray(emptyList())).forEach { m ->
                     UsageBar("${m.mount}  (${m.fstype})", m.used, m.total, "${formatBytes(m.used)} / ${formatBytes(m.total)} · frei ${formatBytes(m.free)}")
                     Text(m.device, style = MaterialTheme.typography.bodySmall)
@@ -314,8 +443,8 @@ fun StorageScreen(api: ApiClient) {
                 }
             }
             SectionCard("Laufwerke") {
-                data["blockdevices"]["blockdevices"].arr.filter { it["type"].str == "disk" && !it["name"].str.startsWith("zram") }.forEach { d ->
-                    Column(Modifier.fillMaxWidth().clickable { smartDev = d["path"].str }.padding(vertical = 6.dp)) {
+                data["blockdevices"]["blockdevices"].arr.filter { it["type"].str == "disk" && !it["name"].str.startsWith("zram") }.forEachIndexed { i, d ->
+                    Column(Modifier.fillMaxWidth().background(stripe(i)).clickable { smartDev = d["path"].str }.padding(6.dp)) {
                         Text("${d["path"].str}  ·  ${formatBytes(d["size"].long)}", fontWeight = Bold)
                         Text(listOf(d["model"].str, d["tran"].str.uppercase(), if (d["rota"].bool == true) "HDD" else "SSD")
                             .filter { it.isNotBlank() }.joinToString(" · "), style = MaterialTheme.typography.bodySmall)
@@ -324,7 +453,6 @@ fun StorageScreen(api: ApiClient) {
                                 style = MaterialTheme.typography.bodySmall)
                         }
                     }
-                    HorizontalDivider()
                 }
                 Text("Tippe auf ein Laufwerk für SMART-Werte.", style = MaterialTheme.typography.bodySmall)
             }
@@ -348,20 +476,20 @@ private fun SmartDialog(api: ApiClient, dev: String, onDismiss: () -> Unit) {
                         when (passed) { true -> "Gesundheit: OK"; false -> "Gesundheit: FEHLER"; null -> "Gesundheit: unbekannt" },
                         color = when (passed) { true -> StatusOk; false -> StatusBad; null -> StatusWarn }, fontWeight = Bold,
                     )
-                    KeyValue("Modell", s["model_name"].str)
-                    KeyValue("Seriennummer", s["serial_number"].str)
-                    KeyValue("Temperatur", s["temperature"]["current"].str + " °C")
-                    KeyValue("Betriebsstunden", s["power_on_time"]["hours"].str)
-                    KeyValue("Einschaltzyklen", s["power_cycle_count"].str)
                     val nvme = s["nvme_smart_health_information_log"]
-                    if (nvme != null) {
-                        KeyValue("Abnutzung", nvme["percentage_used"].str + " %")
-                        KeyValue("Geschrieben", formatBytes((nvme["data_units_written"].long ?: 0) * 512_000))
-                        KeyValue("Medienfehler", nvme["media_errors"].str)
-                    }
-                    s["ata_smart_attributes"]["table"].arr
-                        .filter { it["id"].long in setOf(5L, 9L, 187L, 194L, 197L, 198L, 199L, 241L) }
-                        .forEach { a -> KeyValue("${a["id"].str} ${a["name"].str}", a["raw"]["string"].str) }
+                    val rows = listOfNotNull(
+                        "Modell" to s["model_name"].str,
+                        "Seriennummer" to s["serial_number"].str,
+                        "Temperatur" to s["temperature"]["current"].str + " °C",
+                        "Betriebsstunden" to s["power_on_time"]["hours"].str,
+                        "Einschaltzyklen" to s["power_cycle_count"].str,
+                        nvme?.let { "Abnutzung" to it["percentage_used"].str + " %" },
+                        nvme?.let { "Geschrieben" to formatBytes((it["data_units_written"].long ?: 0) * 512_000) },
+                        nvme?.let { "Medienfehler" to it["media_errors"].str },
+                    ) + s["ata_smart_attributes"]["table"].arr
+                        .filter { it["id"].long in setOf(5L, 9L, 187L, 193L, 194L, 197L, 198L, 199L, 241L) }
+                        .map { a -> "${a["id"].str} ${a["name"].str}" to a["raw"]["string"].str }
+                    rows.forEachIndexed { i, (k, v) -> KeyValue(k, v, i) }
                     ButtonRow {
                         SmallButton("Kurztest", { host.post("SMART-Kurztest", "/api/system/smart/test?device=${enc(dev)}&type=short") })
                         SmallButton("Langtest", { host.post("SMART-Langtest", "/api/system/smart/test?device=${enc(dev)}&type=long") })
@@ -409,11 +537,13 @@ fun NetworkScreen(api: ApiClient) {
         d["interfaces"].arr.forEach { i ->
             val name = i["ifname"].str
             SectionCard(name) {
-                KeyValue("Status", i["operstate"].str)
-                KeyValue("MAC", i["address"].str)
-                i["addr_info"].arr.forEach { a -> KeyValue(if (a["family"].str == "inet6") "IPv6" else "IPv4", "${a["local"].str}/${a["prefixlen"].str}") }
-                rates[name]?.let { (rx, tx) -> KeyValue("Durchsatz", "↓ ${formatBytes(rx)}/s   ↑ ${formatBytes(tx)}/s") }
-                d["counters"][name]?.let { c -> KeyValue("Gesamt", "↓ ${formatBytes(c["rxBytes"].long)}   ↑ ${formatBytes(c["txBytes"].long)}") }
+                val rows = listOf("Status" to i["operstate"].str, "MAC" to i["address"].str) +
+                    i["addr_info"].arr.map { a -> (if (a["family"].str == "inet6") "IPv6" else "IPv4") to "${a["local"].str}/${a["prefixlen"].str}" } +
+                    listOfNotNull(
+                        rates[name]?.let { (rx, tx) -> "Durchsatz" to "↓ ${formatBytes(rx)}/s   ↑ ${formatBytes(tx)}/s" },
+                        d["counters"][name]?.let { c -> "Gesamt" to "↓ ${formatBytes(c["rxBytes"].long)}   ↑ ${formatBytes(c["txBytes"].long)}" },
+                    )
+                rows.forEachIndexed { n, (k, v) -> KeyValue(k, v, n) }
             }
         }
         val wg = d["wireguard"].str
@@ -443,25 +573,27 @@ fun ProcessesScreen(api: ApiClient) {
     val host = rememberActionHost { api }
     LaunchedEffect(sort) { while (true) { delay(5_000); tick++ } }
     Column(Modifier.fillMaxSize()) {
-        Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.padding(start = 12.dp, end = 8.dp, top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             FilterChip(sort == "cpu", { sort = "cpu" }, label = { Text("nach CPU") })
             FilterChip(sort == "mem", { sort = "mem" }, label = { Text("nach RAM") })
+            Spacer(Modifier.weight(1f))
+            RefreshButton { tick++ }
         }
         Loader(sort to tick, { api.get<List<ProcessInfo>>("/api/system/processes?sort=$sort") }) { list, _ ->
             LazyColumn {
-                items(list, key = { it.pid }) { p ->
-                    ListItem(
-                        headlineContent = { Text("${p.comm}  (${p.pid})", maxLines = 1) },
-                        supportingContent = { Text(p.args, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 11.sp) },
-                        trailingContent = {
+                itemsIndexed(list, key = { _, p -> p.pid }) { i, p ->
+                    StripedItem(
+                        i,
+                        headline = { Text("${p.comm}  (${p.pid})", maxLines = 1) },
+                        supporting = { Text(p.args, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = TextSmall) },
+                        trailing = {
                             Column(horizontalAlignment = Alignment.End) {
                                 Text("${p.cpu} % CPU"); Text(formatBytes(p.rssKb * 1024), style = MaterialTheme.typography.bodySmall)
                                 Text(p.user, style = MaterialTheme.typography.bodySmall)
                             }
                         },
-                        modifier = Modifier.clickable { kill = p },
+                        onClick = { kill = p },
                     )
-                    HorizontalDivider()
                 }
             }
         }
@@ -491,12 +623,11 @@ fun UpdatesScreen(api: ApiClient) {
     var confirm by remember { mutableStateOf<Confirm?>(null) }
     Loader(host.result == null, { api.get<UpdatesInfo>("/api/system/updates") }) { u, reload ->
         Column(Modifier.fillMaxSize()) {
-            SectionCard {
+            SectionCard("Systemupdates", actions = { RefreshButton(reload) }) {
                 Text(if (u.packages.isEmpty()) "System ist aktuell." else "${u.packages.size} Updates verfügbar (${u.packages.count { it.Security }} Sicherheit)", fontWeight = Bold)
                 if (u.rebootRequired) Text("Neustart erforderlich.", color = StatusWarn)
                 ButtonRow {
                     SmallButton("Paketlisten aktualisieren", { host.post("apt update", "/api/system/updates/refresh") })
-                    SmallButton("Neu laden", reload)
                     if (u.packages.isNotEmpty()) {
                         SmallButton("Installieren", { confirm = Confirm("Updates installieren?", "apt-get upgrade für ${u.packages.size} Pakete.") { host.post("Upgrade", "/api/system/updates/upgrade") } })
                         SmallButton("Full-Upgrade", { confirm = Confirm("Full-Upgrade ausführen?", "apt-get full-upgrade kann auch Pakete entfernen oder neu installieren.") { host.post("Full-Upgrade", "/api/system/updates/upgrade?mode=full") } })
@@ -505,12 +636,12 @@ fun UpdatesScreen(api: ApiClient) {
                 }
             }
             LazyColumn {
-                items(u.packages) { p ->
-                    ListItem(
-                        headlineContent = { Text(p.Name, color = if (p.Security) StatusBad else MaterialTheme.colorScheme.onSurface) },
-                        supportingContent = { Text("${p.OldVersion} → ${p.NewVersion}\n${p.Origin}", fontSize = 12.sp) },
+                itemsIndexed(u.packages) { i, p ->
+                    StripedItem(
+                        i,
+                        headline = { Text(p.Name, color = if (p.Security) StatusBad else MaterialTheme.colorScheme.onSurface) },
+                        supporting = { Text("${p.OldVersion} → ${p.NewVersion}\n${p.Origin}", fontSize = TextSmall) },
                     )
-                    HorizontalDivider()
                 }
             }
         }
@@ -523,12 +654,14 @@ fun UpdatesScreen(api: ApiClient) {
 
 @Composable
 fun AccountsScreen(api: ApiClient) {
-    Loader(Unit, { api.getJson("/api/system/accounts") }) { d, _ ->
+    Loader(Unit, { api.getJson("/api/system/accounts") }) { d, reload ->
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-            SectionCard("Benutzerkonten") {
-                d["accounts"].arr.forEach { a ->
-                    Text("${a["name"].str}  (UID ${a["uid"].str})", fontWeight = Bold)
-                    Text("${a["gecos"].str} · ${a["home"].str} · ${a["shell"].str}", style = MaterialTheme.typography.bodySmall)
+            SectionCard("Benutzerkonten", actions = { RefreshButton(reload) }) {
+                d["accounts"].arr.forEachIndexed { i, a ->
+                    Column(Modifier.fillMaxWidth().background(stripe(i)).padding(4.dp)) {
+                        Text("${a["name"].str}  (UID ${a["uid"].str})", fontWeight = Bold)
+                        Text("${a["gecos"].str} · ${a["home"].str} · ${a["shell"].str}", style = MaterialTheme.typography.bodySmall)
+                    }
                 }
             }
             SectionCard("Letzte Anmeldungen") { MonoText(d["lastLogins"].str) }
@@ -543,17 +676,18 @@ fun JobsScreen(api: ApiClient) {
     var open by remember { mutableStateOf<JobInfo?>(null) }
     Loader(open == null, { api.get<List<JobInfo>>("/api/jobs").sortedByDescending { it.started } }) { jobs, reload ->
         Column {
-            Row(Modifier.padding(horizontal = 12.dp)) { Text("Aufgaben der letzten 24 h", Modifier.weight(1f).padding(top = 8.dp)); SmallButton("Neu laden", reload) }
+            ListHeader("Länger laufende Aktionen, die aus der App auf dem Server gestartet wurden (z. B. apt, Kopia, Nextcloud), mit Ausgabe. " +
+                "Sie bleiben 24 Stunden sichtbar; ein Neustart des Agenten leert die Liste.") { RefreshButton(reload) }
             if (jobs.isEmpty()) Text("Keine Aufgaben.", Modifier.padding(16.dp))
             LazyColumn {
-                items(jobs, key = { it.id }) { j ->
-                    ListItem(
-                        leadingContent = { StatusDot(when { j.finished == null -> StatusWarn; j.exitCode == 0 -> StatusOk; else -> StatusBad }) },
-                        headlineContent = { Text(j.title) },
-                        supportingContent = { Text(j.started.take(19).replace('T', ' ') + if (j.finished == null) " · läuft" else " · Exit ${j.exitCode}") },
-                        modifier = Modifier.clickable { open = j },
+                itemsIndexed(jobs, key = { _, j -> j.id }) { i, j ->
+                    StripedItem(
+                        i,
+                        leading = { StatusDot(when { j.finished == null -> StatusWarn; j.exitCode == 0 -> StatusOk; else -> StatusBad }) },
+                        headline = { Text(j.title) },
+                        supporting = { Text(j.started.take(19).replace('T', ' ') + if (j.finished == null) " · läuft" else " · Exit ${j.exitCode}") },
+                        onClick = { open = j },
                     )
-                    HorizontalDivider()
                 }
             }
         }

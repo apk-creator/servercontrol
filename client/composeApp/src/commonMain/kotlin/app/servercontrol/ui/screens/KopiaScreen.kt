@@ -1,6 +1,16 @@
 package app.servercontrol.ui.screens
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.runtime.LaunchedEffect
+import kotlinx.serialization.json.JsonElement
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -43,6 +53,7 @@ fun KopiaScreen(api: ApiClient) {
     var open by remember { mutableStateOf<KopiaRepo?>(null) }
     var edit by remember { mutableStateOf<KopiaRepoDef?>(null) }
     var refresh by remember { mutableStateOf(0) }
+    var addMenu by remember { mutableStateOf(false) }
     var discover by remember { mutableStateOf(false) }
     var connect by remember { mutableStateOf(false) }
     val o = open
@@ -52,41 +63,49 @@ fun KopiaScreen(api: ApiClient) {
     }
     Loader(refresh, { api.get<List<KopiaRepo>>("/api/kopia/repos", timeoutMs = 120_000) }) { repos, reload ->
         Column(Modifier.fillMaxSize()) {
-            Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("${repos.size} Repositories", Modifier.weight(1f))
-                SmallButton("Neu laden", reload)
-            }
-            Row(Modifier.padding(horizontal = 12.dp)) {
-                ButtonRow {
-                    Button(onClick = { discover = true }) { Text("Auf dem Server suchen") }
-                    SmallButton("Verbinden / neu anlegen", { connect = true })
-                    SmallButton("Manuell (Config-Datei)", { edit = KopiaRepoDef("", "", "/root/.config/kopia/") })
-                }
+            ListHeader("${repos.size} Repositories") {
+                AddButton({ addMenu = true }, "Repository hinzufügen")
+                RefreshButton(reload)
             }
             if (repos.isEmpty()) Text(
-                "Noch kein Repository eingetragen. Jedes Repository braucht eine eigene Kopia-Konfigurationsdatei " +
-                    "(kopia --config-file=… repository connect …). Optional eine Passwortdatei (chmod 600).",
+                "Noch kein Repository eingetragen. Über + auf dem Server suchen, verbinden oder neu anlegen.",
                 Modifier.padding(16.dp),
             )
             LazyColumn {
-                items(repos, key = { it.id }) { r ->
-                    SectionCard {
-                        Row(Modifier.fillMaxWidth().clickable { open = r }, verticalAlignment = Alignment.CenterVertically) {
-                            StatusDot(if (r.connected) StatusOk else StatusBad)
-                            Spacer(Modifier.width(10.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(r.name, fontWeight = Bold)
-                                Text(r.configFile, style = MaterialTheme.typography.bodySmall)
-                                if (r.sources.isNotEmpty()) Text("Quellen: " + r.sources.joinToString(), style = MaterialTheme.typography.bodySmall)
-                                r.error?.takeIf { it.isNotBlank() }?.let { Text(it.take(300), color = StatusBad, fontSize = 12.sp) }
+                itemsIndexed(repos, key = { _, r -> r.id }) { i, r ->
+                    StripedItem(
+                        i,
+                        leading = { StatusDot(if (r.connected) StatusOk else StatusBad) },
+                        headline = { Text(r.name, fontWeight = Bold) },
+                        supporting = {
+                            Column {
+                                Text(if (r.sources.isNotEmpty()) "Sicherung: " + r.sources.joinToString() else r.configFile, fontSize = TextSmall)
+                                r.error?.takeIf { it.isNotBlank() }?.let { Text(it.take(300), color = StatusBad, fontSize = TextSmall) }
                             }
-                            TextButton(onClick = { edit = KopiaRepoDef(r.id, r.name, r.configFile, r.passwordFile, r.sources) }) { Text("Bearbeiten") }
-                        }
-                    }
+                        },
+                        trailing = {
+                            IconButton(onClick = { edit = KopiaRepoDef(r.id, r.name, r.configFile, r.passwordFile, r.sources) }) {
+                                Icon(Icons.Default.Edit, "Bearbeiten")
+                            }
+                        },
+                        onClick = { open = r },
+                    )
                 }
             }
         }
     }
+    if (addMenu) AppDialog(
+        onDismissRequest = { addMenu = false },
+        title = { Text("Repository hinzufügen") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { addMenu = false; discover = true }, Modifier.fillMaxWidth()) { Text("Auf dem Server suchen") }
+                Button(onClick = { addMenu = false; connect = true }, Modifier.fillMaxWidth()) { Text("Verbinden / neu anlegen") }
+                Button(onClick = { addMenu = false; edit = KopiaRepoDef("", "", "/root/.config/kopia/") }, Modifier.fillMaxWidth()) { Text("Manuell via Config-Datei") }
+            }
+        },
+        confirmButton = { TextButton(onClick = { addMenu = false }) { Text("Abbrechen") } },
+    )
     edit?.let { def -> KopiaRepoEditor(api, def, onDone = { edit = null; refresh++ }) }
     if (discover) KopiaDiscoverDialog(api, onPick = { def -> discover = false; edit = def }, onDismiss = { discover = false })
     if (connect) KopiaConnectDialog(api) { connect = false; refresh++ }
@@ -106,21 +125,20 @@ private fun KopiaDiscoverDialog(api: ApiClient, onPick: (KopiaRepoDef) -> Unit, 
         title = { Text("Kopia-Konfigurationen auf dem Server") },
         text = {
             Loader(Unit, { api.getJson("/api/kopia/discover") }) { list, _ ->
-                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
                     if (list.arr.isEmpty()) Text("Keine gefunden. Gesucht in /root/.config/kopia*, /home/*/.config/kopia* und /etc/servercontrol/kopia.")
-                    list.arr.forEach { f ->
+                    list.arr.forEachIndexed { i, f ->
                         val cf = f["configFile"].str
-                        Column {
+                        Column(Modifier.fillMaxWidth().background(stripe(i)).padding(6.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 StatusDot(if (f["connected"].bool == true) StatusOk else StatusBad)
                                 Spacer(Modifier.width(8.dp))
-                                Text(cf, fontWeight = Bold, fontSize = 13.sp)
+                                Text(cf, fontWeight = Bold, fontSize = TextSmall)
                             }
-                            if (f["connected"].bool == true) Text("${f["storage"].str}: ${f["path"].str}", fontSize = 12.sp)
-                            else Text(f["error"].str.take(200), fontSize = 12.sp, color = StatusBad)
-                            if (f["knownAs"].str.isNotBlank()) Text("bereits eingebunden als „${f["knownAs"].str}“", fontSize = 12.sp, color = StatusOk)
+                            if (f["connected"].bool == true) Text("${f["storage"].str}: ${f["path"].str}", fontSize = TextSmall)
+                            else Text(f["error"].str.take(200), fontSize = TextSmall, color = StatusBad)
+                            if (f["knownAs"].str.isNotBlank()) Text("bereits eingebunden als „${f["knownAs"].str}“", fontSize = TextSmall, color = StatusOk)
                             else TextButton(onClick = { onPick(KopiaRepoDef(idFromFile(cf), idFromFile(cf), cf)) }) { Text("Übernehmen") }
-                            HorizontalDivider()
                         }
                     }
                 }
@@ -153,7 +171,7 @@ private fun KopiaConnectDialog(api: ApiClient, onDone: () -> Unit) {
                 Text(
                     if (create) "Legt ein neues, verschlüsseltes Repository im angegebenen Verzeichnis an (z. B. auf einer HDD)."
                     else "Verbindet ein bestehendes Repository (Verzeichnis mit kopia.repository.f). Die Daten bleiben unverändert.",
-                    fontSize = 12.sp,
+                    fontSize = TextSmall,
                 )
                 OutlinedTextField(id, { id = it.lowercase().filter { c -> c.isLetterOrDigit() || c == '-' || c == '_' }.take(32) },
                     Modifier.fillMaxWidth(), label = { Text("Kennung (z. B. hdd1)") }, singleLine = true)
@@ -161,10 +179,10 @@ private fun KopiaConnectDialog(api: ApiClient, onDone: () -> Unit) {
                 OutlinedTextField(path, { path = it.trim() }, Modifier.fillMaxWidth(), label = { Text("Repository-Verzeichnis auf dem Server") }, singleLine = true)
                 SecretField(password, { password = it }, "Repository-Passwort")
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(store, { store = it }); Text("Passwort auf dem Server hinterlegen (für Aktionen aus der App)", fontSize = 13.sp)
+                    Checkbox(store, { store = it }); Text("Passwort auf dem Server hinterlegen (für Aktionen aus der App)", fontSize = TextSmall)
                 }
                 OutlinedTextField(sources, { sources = it }, Modifier.fillMaxWidth(), label = { Text("Snapshot-Quellen, eine pro Zeile (optional)") }, minLines = 2)
-                if (create) Text("Wichtig: Ohne Passwort sind die Daten nicht wiederherstellbar – sicher aufbewahren!", color = StatusWarn, fontSize = 12.sp)
+                if (create) Text("Wichtig: Ohne Passwort sind die Daten nicht wiederherstellbar – sicher aufbewahren!", color = StatusWarn, fontSize = TextSmall)
             }
         },
         confirmButton = {
@@ -232,81 +250,145 @@ private fun KopiaRepoEditor(api: ApiClient, initial: KopiaRepoDef, onDone: () ->
     ActionResultDialog(host, api)
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+private fun localTime(iso: String): String = isoToMs(iso)?.let { formatTime(it).dropLast(3) } ?: iso.take(16).replace('T', ' ')
+
+private fun sourceId(src: KopiaSource?): String? = src?.let { "${it.userName}@${it.host}:${it.path}" }
+
+/** kopia JSON duration (nanoseconds) → "6 h" */
+private fun hoursOf(ns: Long?): String = ns?.let { n ->
+    val h = n / 3_600_000_000_000.0
+    if (h >= 1 && h % 24.0 == 0.0 && h >= 48) "${(h / 24).toLong()} Tage" else if (h >= 1) "${h.toLong()} h" else "${(n / 60_000_000_000)} min"
+} ?: "–"
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun KopiaRepoDetail(api: ApiClient, repo: KopiaRepo, onBack: () -> Unit) {
     val host = rememberActionHost { api }
     var confirm by remember { mutableStateOf<Confirm?>(null) }
     var restore by remember { mutableStateOf<KopiaSnapshot?>(null) }
-    var showSource by remember { mutableStateOf<String?>(null) }
+    var tick by remember { mutableStateOf(0) }
+    var editSchedule by remember { mutableStateOf<Pair<String, JsonElement?>?>(null) }
+    var editMaint by remember { mutableStateOf<JsonElement?>(null) }
     val base = "/api/kopia/repos/${repo.id}"
     Column(Modifier.fillMaxSize()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Zurück") }
-            Text(repo.name, style = MaterialTheme.typography.titleMedium)
+            Text(repo.name, fontWeight = Bold)
         }
-        Loader(repo.id, {
-            api.getJson("$base/status") to api.get<List<KopiaSnapshot>>("$base/snapshots", timeoutMs = 180_000)
-        }) { (status, snaps), reload ->
+        // actions as separate buttons at the top
+        FlowRow(
+            Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Button(onClick = {
+                confirm = Confirm("Snapshot starten?",
+                    if (repo.sources.isEmpty()) "Alle bekannten Quellen in ${repo.name} sichern." else "Sicherung von ${repo.sources.joinToString()}") {
+                    host.post("Snapshot", "$base/snapshot")
+                }
+            }, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)) { Text("Snapshot starten") }
+            SmallButton("Kurzwartung", { host.post("Kurzwartung", "$base/quick-maintenance") })
+            SmallButton("Wartung", {
+                confirm = Confirm("Vollständige Wartung starten?", "Räumt abgelaufene Snapshots und nicht mehr benötigte Daten auf. Kann bei großen Repositories lange dauern.") {
+                    host.post("Wartung", "$base/maintenance")
+                }
+            })
+            RefreshButton { tick++ }
+        }
+        Loader(repo.id to tick, {
+            Triple(
+                api.getJson("$base/status"),
+                api.get<List<KopiaSnapshot>>("$base/snapshots", timeoutMs = 180_000),
+                Unit,
+            )
+        }) { (status, snaps, _), reload ->
+            val bySource = snaps.groupBy { it.source?.path ?: "?" }
+                .mapValues { (_, l) -> l.sortedByDescending { isoToMs(it.startTime) ?: 0L } }
+            val sources = (repo.sources + bySource.keys).distinct().filter { it != "?" }
             LazyColumn {
                 item {
-                    SectionCard("Repository") {
+                    SectionCard("Repository", stateKey = "kopia-repo") {
                         status["error"]?.let { Text(it.str, color = StatusBad) }
                         val st = status["status"]
-                        KeyValue("Speicher", st["storage"]["type"].str + "  " + st["storage"]["config"]["path"].str)
-                        KeyValue("Verschlüsselung", st["encryption"].str)
-                        KeyValue("Hash / Splitter", "${st["hash"].str} / ${st["splitter"].str}")
-                        KeyValue("Konfiguration", repo.configFile)
-                        val m = status["maintenance"]
-                        KeyValue("Wartung", "quick: ${m["quick"]["enabled"].str}, full: ${m["full"]["enabled"].str}")
-                        m["runs"].obj.forEach { (k, v) ->
-                            val last = v.arr.firstOrNull()
-                            if (last != null) KeyValue("Letzte $k", last["end"].str.take(19).replace('T', ' ') + if (last["success"].bool == false) " ✗" else " ✓")
+                        val d = status["drive"]
+                        val drive = if (d == null) "–" else buildString {
+                            append(d["disk"].str.ifBlank { d["device"].str })
+                            d["model"].str.takeIf { it.isNotBlank() }?.let { append(" · $it") }
+                            d["rotational"].bool?.let { append(if (it) " · HDD" else " · SSD") }
+                            val total = d["total"].long ?: 0
+                            if (total > 0) append(" · ${(100 * (d["used"].long ?: 0) / total)} % belegt (${formatBytes(d["used"].long)} / ${formatBytes(total)})")
                         }
+                        KeyValues(
+                            "Pfad" to st["storage"]["config"]["path"].str.ifBlank { st["storage"]["type"].str },
+                            "Laufwerk" to drive,
+                            "Konfiguration" to repo.configFile,
+                        )
                         ButtonRow {
-                            SmallButton("Snapshot jetzt", {
-                                confirm = Confirm("Snapshot erstellen?",
-                                    if (repo.sources.isEmpty()) "Alle bekannten Quellen in ${repo.name} sichern." else "Quellen: ${repo.sources.joinToString()}") {
-                                    host.post("Snapshot", "$base/snapshot")
-                                }
-                            })
-                            SmallButton("Wartung (full)", { host.post("Wartung", "$base/maintenance") })
                             SmallButton("Verifizieren (1 %)", { host.post("Verifizieren", "$base/verify", """{"percent":1}""") })
-                            SmallButton("Neu laden", reload)
                         }
                     }
                 }
-                val bySource = snaps.groupBy { it.source?.path ?: "?" }
-                bySource.forEach { (src, list) ->
-                    val sorted = list.sortedByDescending { it.startTime }
-                    val latest = sorted.firstOrNull()
+                sources.forEach { src ->
+                    val list = bySource[src].orEmpty()
                     item(key = "src-$src") {
-                        SectionCard(src) {
-                            Text("${list.size} Snapshots · letzter ${latest?.startTime?.take(19)?.replace('T', ' ') ?: "–"} · ${formatBytes(latest?.totalSize)}",
-                                style = MaterialTheme.typography.bodySmall)
-                            ButtonRow {
-                                SmallButton("Jetzt sichern", { host.post("Snapshot $src", "$base/snapshot", """{"source":${jsonString(src)}}""") })
-                                SmallButton(if (showSource == src) "Liste ausblenden" else "Snapshots anzeigen", { showSource = if (showSource == src) null else src })
+                        SectionCard(if (sources.size > 1) "Sicherung · $src" else "Sicherung", stateKey = "kopia-src") {
+                            KeyValues(
+                                "Startpfad" to src,
+                                "Snapshots" to if (list.isEmpty()) "keine" else "${list.size} · letzter ${localTime(list.first().startTime)} · ${formatBytes(list.first().totalSize)}",
+                            )
+                            if (sources.size > 1) ButtonRow {
+                                SmallButton("Nur diese Quelle sichern", { host.post("Snapshot $src", "$base/snapshot", """{"source":${jsonString(src)}}""") })
                             }
-                            if (showSource == src) sorted.forEach { s ->
-                                HorizontalDivider()
-                                Row(verticalAlignment = Alignment.CenterVertically) {
+                            list.forEachIndexed { i, s ->
+                                Row(
+                                    Modifier.fillMaxWidth().background(stripe(i)).clickable { restore = s }.padding(horizontal = 4.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
                                     Column(Modifier.weight(1f)) {
-                                        Text(s.startTime.take(19).replace('T', ' '), fontWeight = Bold)
+                                        Text(localTime(s.startTime))
                                         Text("${formatBytes(s.totalSize)} · ${s.files ?: "?"} Dateien" +
                                             (if ((s.errors ?: 0) > 0) " · ${s.errors} Fehler" else "") +
                                             (s.retention?.takeIf { it.isNotEmpty() }?.let { " · " + it.joinToString() } ?: ""),
-                                            fontSize = 12.sp)
+                                            fontSize = TextSmall, color = if ((s.errors ?: 0) > 0) StatusWarn else MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
-                                    TextButton(onClick = { restore = s }) { Text("…") }
+                                    Icon(Icons.Default.MoreVert, "Wiederherstellen oder löschen", Modifier.size(20.dp))
                                 }
                             }
                         }
                     }
                 }
-                if (snaps.isEmpty()) item { Text("Keine Snapshots vorhanden.", Modifier.padding(16.dp)) }
+                if (snaps.isEmpty() && sources.isEmpty()) item { Text("Keine Snapshots vorhanden.", Modifier.padding(16.dp)) }
+                item(key = "schedules") {
+                    SectionCard("Zeitpläne", stateKey = "kopia-schedules") {
+                        val srcIds = snaps.mapNotNull { sourceId(it.source) }.distinct()
+                        if (srcIds.isEmpty()) Text("Zeitpläne gelten je Sicherung; sie erscheinen nach dem ersten Snapshot.", fontSize = TextSmall)
+                        srcIds.forEach { id -> ScheduleBlock(api, base, id, tick) { pol -> editSchedule = id to pol } }
+                        val m = status["maintenance"]
+                        HorizontalDivider()
+                        Text("Wartung", fontWeight = Bold)
+                        val rows = mutableListOf(
+                            "Kurzwartung" to (if (m["quick"]["enabled"].bool == true) "alle ${hoursOf(m["quick"]["interval"].long)}" else "aus"),
+                            "Wartung" to (if (m["full"]["enabled"].bool == true) "alle ${hoursOf(m["full"]["interval"].long)}" else "aus"),
+                        )
+                        m["owner"].str.takeIf { it.isNotBlank() }?.let { rows += "Zuständig" to it }
+                        m["runs"].obj.forEach { (k, v) ->
+                            val last = v.arr.firstOrNull()
+                            if (last != null) rows += "Zuletzt $k" to localTime(last["end"].str) + if (last["success"].bool == false) " ✗" else " ✓"
+                        }
+                        rows.forEachIndexed { i, (k, v) -> KeyValue(k, v, i) }
+                        Text("Hinweis: Laufen die Wartungen über eigene Skripte (z. B. nach dem Snapshot), hier „aus“ lassen.", fontSize = TextSmall)
+                        ButtonRow { SmallButton("Wartung einstellen", { editMaint = m ?: kotlinx.serialization.json.JsonObject(emptyMap()) }) }
+                    }
+                }
+                item { Spacer(Modifier.heightIn(min = 24.dp)) }
             }
         }
+    }
+    editSchedule?.let { (src, pol) ->
+        ScheduleEditor(api, base, src, pol, host) { editSchedule = null; tick++ }
+    }
+    editMaint?.let { m ->
+        MaintenanceEditor(base, m, host) { editMaint = null; tick++ }
     }
     restore?.let { s ->
         var target by remember(s.id) { mutableStateOf("/tmp/restore-${s.id.take(8)}") }
@@ -315,7 +397,7 @@ private fun KopiaRepoDetail(api: ApiClient, repo: KopiaRepo, onBack: () -> Unit)
             title = { Text("Snapshot ${s.id.take(12)}…") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Quelle: ${s.source?.path}\nZeit: ${s.startTime}")
+                    Text("Quelle: ${s.source?.path}\nZeit: ${localTime(s.startTime)}")
                     OutlinedTextField(target, { target = it.trim() }, label = { Text("Wiederherstellen nach (leeres Verzeichnis)") }, singleLine = true)
                 }
             },
@@ -338,4 +420,123 @@ private fun KopiaRepoDetail(api: ApiClient, repo: KopiaRepo, onBack: () -> Unit)
     }
     ConfirmDialog(confirm) { confirm = null }
     ActionResultDialog(host, api)
+}
+
+/** Snapshot schedule and retention of one source (effective policy). */
+@Composable
+private fun ScheduleBlock(api: ApiClient, base: String, source: String, tick: Int, onEdit: (JsonElement?) -> Unit) {
+    var pol by remember(source, tick) { mutableStateOf<JsonElement?>(null) }
+    var err by remember(source, tick) { mutableStateOf<String?>(null) }
+    LaunchedEffect(source, tick) {
+        try { pol = api.getJson("$base/schedule?source=${encQ(source)}") } catch (e: Throwable) { err = e.message }
+    }
+    Text(source.substringAfter(':'), fontWeight = Bold)
+    err?.let { Text(it, color = StatusBad, fontSize = TextSmall) }
+    val p = pol ?: run { if (err == null) LinearProgressIndicator(Modifier.fillMaxWidth()); return }
+    val sch = p["scheduling"]
+    val times = sch["timeOfDay"].arr.joinToString(", ") { "${it["hour"].long?.toString()?.padStart(2, '0')}:${it["min"].long?.toString()?.padStart(2, '0')}" }
+    val interval = sch["intervalSeconds"].long?.takeIf { it > 0 }?.let { hoursOf(it * 1_000_000_000) }
+    val cron = sch["cron"].arr.joinToString("; ") { it.str }
+    val ret = p["retention"]
+    fun k(n: String) = ret[n].long?.toString() ?: "–"
+    val rows = listOfNotNull(
+        "Uhrzeiten" to times.ifBlank { "–" },
+        interval?.let { "Intervall" to "alle $it" },
+        cron.takeIf { it.isNotBlank() }?.let { "Crontab" to it },
+        if (sch["manual"].bool == true) "Modus" to "nur manuell" else null,
+        "Aufbewahrung" to "letzte ${k("keepLatest")} · stündl. ${k("keepHourly")} · tägl. ${k("keepDaily")} · wöch. ${k("keepWeekly")} · monatl. ${k("keepMonthly")} · jährl. ${k("keepAnnual")}",
+    )
+    rows.forEachIndexed { i, (a, b) -> KeyValue(a, b, i) }
+    ButtonRow { SmallButton("Zeitplan einstellen", { onEdit(p) }) }
+}
+
+private fun encQ(s: String) = s.replace("%", "%25").replace(" ", "%20").replace("&", "%26").replace("+", "%2B").replace("#", "%23").replace("?", "%3F")
+
+@Composable
+private fun ScheduleEditor(api: ApiClient, base: String, source: String, pol: JsonElement?, host: ActionHost, onDone: () -> Unit) {
+    val sch = pol["scheduling"]
+    val ret = pol["retention"]
+    val initialInterval = sch["intervalSeconds"].long?.takeIf { it > 0 }?.let { (it / 3600).toString() } ?: ""
+    var times by remember { mutableStateOf(sch["timeOfDay"].arr.joinToString(", ") { "${it["hour"].long?.toString()?.padStart(2, '0')}:${it["min"].long?.toString()?.padStart(2, '0')}" }) }
+    var interval by remember { mutableStateOf(initialInterval) }
+    var cron by remember { mutableStateOf(sch["cron"].arr.joinToString("; ") { it.str }) }
+    val keys = listOf("latest" to "Letzte", "hourly" to "Stündlich", "daily" to "Täglich", "weekly" to "Wöchentlich", "monthly" to "Monatlich", "annual" to "Jährlich")
+    val keep = remember {
+        androidx.compose.runtime.mutableStateMapOf<String, String>().apply {
+            keys.forEach { (k, _) -> put(k, ret["keep" + k.replaceFirstChar { it.uppercase() }].long?.toString() ?: "") }
+        }
+    }
+    AppDialog(
+        onDismissRequest = onDone,
+        title = { Text("Zeitplan · ${source.substringAfter(':')}") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Die Werte gelten für diese Sicherung. Leere Felder übernehmen die globale Vorgabe des Repositorys.", fontSize = TextSmall)
+                OutlinedTextField(times, { times = it }, Modifier.fillMaxWidth(), label = { Text("Uhrzeiten (z. B. 01:00, 13:00)") }, singleLine = true)
+                OutlinedTextField(interval, { interval = it.filter(Char::isDigit).take(4) }, Modifier.fillMaxWidth(),
+                    label = { Text("Zusätzlich alle … Stunden (0 = kein Intervall)") }, singleLine = true)
+                OutlinedTextField(cron, { cron = it }, Modifier.fillMaxWidth(), label = { Text("Crontab (optional, z. B. 0 1 * * *)") }, singleLine = true)
+                Text("Aufbewahrung (Anzahl Snapshots)", fontWeight = Bold)
+                keys.chunked(2).forEach { pair ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        pair.forEach { (k, label) ->
+                            OutlinedTextField(keep[k] ?: "", { v -> keep[k] = v.filter(Char::isDigit).take(5) }, Modifier.weight(1f), label = { Text(label) }, singleLine = true)
+                        }
+                    }
+                }
+                Text("Der Kopia-Dienst auf dem Server übernimmt geänderte Zeitpläne, sobald er die Richtlinien neu einliest; im Zweifel seinen Dienst neu starten.", fontSize = TextSmall)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                val body = buildJsonObject {
+                    put("source", source)
+                    put("times", times.replace(" ", ""))
+                    put("crontab", cron.trim())
+                    if (interval != initialInterval) put("intervalHours", interval.toIntOrNull() ?: 0)
+                    put("keep", buildJsonObject { keys.forEach { (k, _) -> put(k, keep[k] ?: "") } })
+                }.toString()
+                host.run("Zeitplan gespeichert", { api.postRaw("$base/schedule", body); "Richtlinie für $source gespeichert." }, after = {
+                    if ((host.result as? ActionResult.Message)?.ok == true) onDone()
+                })
+            }) { Text("Speichern") }
+        },
+        dismissButton = { TextButton(onClick = onDone) { Text("Abbrechen") } },
+    )
+}
+
+@Composable
+private fun MaintenanceEditor(base: String, m: JsonElement, host: ActionHost, onDone: () -> Unit) {
+    fun h(ns: Long?) = ns?.let { (it / 3_600_000_000_000).toString() } ?: ""
+    var quick by remember { mutableStateOf(m["quick"]["enabled"].bool == true) }
+    var full by remember { mutableStateOf(m["full"]["enabled"].bool == true) }
+    var quickH by remember { mutableStateOf(h(m["quick"]["interval"].long)) }
+    var fullH by remember { mutableStateOf(h(m["full"]["interval"].long)) }
+    AppDialog(
+        onDismissRequest = onDone,
+        title = { Text("Automatische Wartung") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Wird vom Kopia-Dienst ausgeführt und weckt dafür die Platte des Repositorys.", fontSize = TextSmall)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Kurzwartung", Modifier.weight(1f)); Switch(quick, { quick = it })
+                }
+                OutlinedTextField(quickH, { quickH = it.filter(Char::isDigit).take(4) }, Modifier.fillMaxWidth(), label = { Text("alle … Stunden") }, singleLine = true, enabled = quick)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Wartung", Modifier.weight(1f)); Switch(full, { full = it })
+                }
+                OutlinedTextField(fullH, { fullH = it.filter(Char::isDigit).take(4) }, Modifier.fillMaxWidth(), label = { Text("alle … Stunden") }, singleLine = true, enabled = full)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                val body = buildJsonObject {
+                    put("quickEnabled", quick); put("fullEnabled", full)
+                    put("quickHours", quickH.toIntOrNull() ?: 0); put("fullHours", fullH.toIntOrNull() ?: 0)
+                }.toString()
+                host.post("Wartung eingestellt", "$base/maintenance-schedule", body, onDone)
+            }) { Text("Speichern") }
+        },
+        dismissButton = { TextButton(onClick = onDone) { Text("Abbrechen") } },
+    )
 }

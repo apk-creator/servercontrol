@@ -93,12 +93,23 @@ func temperatures() []Temp {
 }
 
 func handleOverview(w http.ResponseWriter, r *http.Request) {
-	a := readCPU()
-	time.Sleep(300 * time.Millisecond)
-	b := readCPU()
-	cpu := 0.0
-	if dt := b.total - a.total; dt > 0 {
-		cpu = 100 * (1 - float64(b.idle-a.idle)/float64(dt))
+	cur, cores, hdd := metrics.snapshot()
+	var hddC []float64
+	hddStandby := 0
+	for _, t := range hdd {
+		if t.Standby {
+			hddStandby++
+		}
+		if t.C > 0 {
+			hddC = append(hddC, t.C)
+		}
+	}
+	var fs []Mount
+	for _, m := range mounts() {
+		if m.Mount == "/boot/efi" || strings.HasPrefix(m.Mount, "/boot") {
+			continue
+		}
+		fs = append(fs, m)
 	}
 	var si syscall.Sysinfo_t
 	_ = syscall.Sysinfo(&si)
@@ -134,7 +145,16 @@ func handleOverview(w http.ResponseWriter, r *http.Request) {
 		"kernel":         strings.TrimSpace(string(kern)),
 		"cpuModel":       model,
 		"cpuCores":       countCPUs(),
-		"cpuPercent":     cpu,
+		"cpuPercent":     cur.CPU,
+		"cores":          cores,
+		"disk":           map[string]float64{"read": cur.DiskRead, "write": cur.DiskWrite, "busy": cur.DiskBusy},
+		"net":            map[string]float64{"rx": cur.NetRx, "tx": cur.NetTx},
+		"tempBoard":      statsOf(boardTemps()),
+		"tempDisks":      statsOf(hddC),
+		"hddTemps":       hdd,
+		"hddStandby":     hddStandby,
+		"filesystems":    fs,
+		"scheduledPower": scheduledPower(),
 		"load":           loads,
 		"uptimeSeconds":  si.Uptime,
 		"memTotal":       mi["MemTotal"],
@@ -496,13 +516,31 @@ func (s *Server) handleUpdatesUpgrade(w http.ResponseWriter, r *http.Request) {
 
 func handlePower(w http.ResponseWriter, r *http.Request) {
 	act := r.PathValue("action")
+	if act == "cancel" {
+		logf("scheduled shutdown cancelled")
+		sendResult(w, run(r.Context(), 10*time.Second, nil, "shutdown", "-c"))
+		return
+	}
 	if act != "reboot" && act != "poweroff" {
 		writeErr(w, 400, "invalid action")
 		return
 	}
-	logf("power %s requested", act)
-	// small delay so the HTTP response reaches the client
-	sendResult(w, run(r.Context(), 10*time.Second, nil, "systemd-run", "--on-active=5", "systemctl", act))
+	delay, _ := strconv.Atoi(r.URL.Query().Get("delay")) // minutes
+	if delay < 0 || delay > 1440 {
+		writeErr(w, 400, "invalid delay")
+		return
+	}
+	logf("power %s requested (in %d min)", act, delay)
+	if delay == 0 {
+		// small delay so the HTTP response reaches the client
+		sendResult(w, run(r.Context(), 10*time.Second, nil, "systemd-run", "--on-active=5", "systemctl", act))
+		return
+	}
+	flag := "-r"
+	if act == "poweroff" {
+		flag = "-P"
+	}
+	sendResult(w, run(r.Context(), 10*time.Second, nil, "shutdown", flag, "+"+strconv.Itoa(delay)))
 }
 
 // ======================= Users (local accounts) =======================

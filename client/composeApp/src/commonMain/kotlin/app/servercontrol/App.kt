@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -90,9 +91,23 @@ private val MonoDark = darkColorScheme(
     surfaceContainerHighest = Color(0xFF2B2B2B),
 )
 
+/** Only two font sizes in the whole app: big (text, titles, buttons) and small (details). */
+private val TwoSizeTypography: Typography = run {
+    val t = Typography()
+    fun big(s: androidx.compose.ui.text.TextStyle) = s.copy(fontSize = app.servercontrol.ui.TextBig, lineHeight = app.servercontrol.ui.LineBig, letterSpacing = androidx.compose.ui.unit.TextUnit.Unspecified)
+    fun small(s: androidx.compose.ui.text.TextStyle) = s.copy(fontSize = app.servercontrol.ui.TextSmall, lineHeight = app.servercontrol.ui.LineSmall)
+    Typography(
+        displayLarge = big(t.displayLarge), displayMedium = big(t.displayMedium), displaySmall = big(t.displaySmall),
+        headlineLarge = big(t.headlineLarge), headlineMedium = big(t.headlineMedium), headlineSmall = big(t.headlineSmall),
+        titleLarge = big(t.titleLarge).copy(fontWeight = FontWeight.SemiBold), titleMedium = big(t.titleMedium), titleSmall = big(t.titleSmall),
+        bodyLarge = big(t.bodyLarge), bodyMedium = big(t.bodyMedium), bodySmall = small(t.bodySmall),
+        labelLarge = big(t.labelLarge), labelMedium = small(t.labelMedium), labelSmall = small(t.labelSmall),
+    )
+}
+
 @Composable
 fun AppTheme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = if (isSystemInDarkTheme()) MonoDark else MonoLight, content = content)
+    MaterialTheme(colorScheme = if (isSystemInDarkTheme()) MonoDark else MonoLight, typography = TwoSizeTypography, content = content)
 }
 
 @Composable
@@ -143,8 +158,9 @@ fun ProfilesScreen(state: AppState) {
             if (state.vault.profiles.isEmpty()) item {
                 Text("Noch kein Server angelegt. Tippe auf +.", Modifier.padding(24.dp))
             }
-            items(state.vault.profiles, key = { it.id }) { p ->
+            itemsIndexed(state.vault.profiles, key = { _, p -> p.id }) { i, p ->
                 ListItem(
+                    colors = ListItemDefaults.colors(containerColor = app.servercontrol.ui.stripe(i)),
                     headlineContent = { Text(p.name) },
                     supportingContent = {
                         Text(buildString {
@@ -156,7 +172,6 @@ fun ProfilesScreen(state: AppState) {
                     trailingContent = { IconButton(onClick = { editing = p }) { Icon(Icons.Default.Edit, "Bearbeiten") } },
                     modifier = Modifier.clickable { state.openProfile(p) },
                 )
-                HorizontalDivider()
             }
         }
     }
@@ -286,14 +301,11 @@ fun MainScreen(state: AppState) {
                     title = {
                         Column {
                             Text(state.section.title)
-                            Text(session.profile.name, style = MaterialTheme.typography.bodySmall)
+                            Text(session.profile.name, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Normal)
                         }
                     },
                     navigationIcon = {
                         if (!wide) IconButton(onClick = { scope.launch { drawer.open() } }) { Icon(Icons.Default.Menu, "Menü") }
-                    },
-                    actions = {
-                        IconButton(onClick = { state.logout() }) { Icon(Icons.AutoMirrored.Filled.Logout, "Abmelden") }
                     },
                 )
             }) { pad ->
