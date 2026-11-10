@@ -56,6 +56,7 @@ fun SshKeysScreen(state: AppState, session: Session) {
     val today = formatTime(currentTimeMs()).take(8)
     var comment by remember { mutableStateOf("servercontrol-${if (isDesktop) "desktop" else "android"}-$today") }
     var addKey by remember { mutableStateOf(false) }
+    var importKey by remember { mutableStateOf(false) }
     var genError by remember { mutableStateOf<String?>(null) }
 
     fun register(key: String) {
@@ -107,6 +108,7 @@ fun SshKeysScreen(state: AppState, session: Session) {
                 }) { Text(if (generating) "Erzeuge …" else "Schlüssel erzeugen") }
                 if (generating) LinearProgressIndicator(Modifier.fillMaxWidth())
                 genError?.let { Text(it, color = StatusBad) }
+                TextButton(onClick = { importKey = true }) { Text("Stattdessen vorhandenen privaten Schlüssel einfügen …") }
             } else {
                 if (p.sshPublicKey.isNotBlank()) {
                     KeyValue("Typ", p.sshPublicKey.substringBefore(' '))
@@ -144,7 +146,26 @@ fun SshKeysScreen(state: AppState, session: Session) {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(d["file"].str, fontSize = 12.sp)
                         val pw = d["passwordAuthentication"].str
-                        if (pw.isNotBlank()) Text("Passwort-Anmeldung per SSH: ${if (pw == "yes") "an" else "aus"}", fontSize = 12.sp)
+                        if (pw.isNotBlank()) {
+                            Text("Passwort-Anmeldung per SSH: ${if (pw == "yes") "an" else "aus"}", fontSize = 12.sp, fontWeight = Bold)
+                            val keyCount = d["keys"].arr.size
+                            val mineRegistered = d["keys"].arr.any { it["fingerprint"].str == session.profile.sshKeyFingerprint }
+                            fun toggle(enable: Boolean) {
+                                val body = buildJsonObject { put("enabled", enable); put("user", user.trim()) }.toString()
+                                host.run("Passwort-Anmeldung", {
+                                    AppJson.parseToJsonElement(api.postRaw("/api/ssh/password-auth", body))["message"].str
+                                }, reload)
+                            }
+                            if (pw == "yes" && keyCount > 0) SmallButton("Passwort-Anmeldung abschalten", {
+                                confirm = Confirm("Passwort-Anmeldung per SSH abschalten?",
+                                    "Danach kommen nur noch Geräte mit eingetragenem Schlüssel per SSH auf den Server (alle Benutzer)." +
+                                        (if (!mineRegistered) "\n\nACHTUNG: Der Schlüssel dieses Geräts ist für ${user.trim()} nicht eingetragen!" else "") +
+                                        "\n\nVorher am besten einmal per Schlüssel anmelden und die Sitzung offen lassen. Notfallzugang bleibt Cockpit (Port 9090) und diese App.") {
+                                    toggle(false)
+                                }
+                            })
+                            if (pw == "no") SmallButton("Passwort-Anmeldung wieder einschalten", { toggle(true) })
+                        }
                         if (d["keys"].arr.isEmpty()) Text("Noch keine Schlüssel eingetragen.", fontSize = 13.sp)
                         d["keys"].arr.forEach { k ->
                             val fp = k["fingerprint"].str
@@ -192,6 +213,30 @@ fun SshKeysScreen(state: AppState, session: Session) {
                 TextButton(enabled = text.isNotBlank() && user.isNotBlank(), onClick = { register(text.trim()); addKey = false }) { Text("Eintragen") }
             },
             dismissButton = { TextButton(onClick = { addKey = false }) { Text("Abbrechen") } },
+        )
+    }
+    if (importKey) {
+        var text by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { importKey = false },
+            title = { Text("Privaten Schlüssel einfügen") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Inhalt der privaten Schlüsseldatei (OpenSSH oder PEM). Er wird verschlüsselt im Profil gespeichert.", fontSize = 12.sp)
+                    OutlinedTextField(
+                        text, { text = it }, Modifier.fillMaxWidth(), minLines = 1, maxLines = 1,
+                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                        placeholder = { Text("-----BEGIN OPENSSH PRIVATE KEY-----") },
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(enabled = text.contains("PRIVATE KEY"), onClick = {
+                    state.updateSessionProfile(session.profile.copy(sshPrivateKey = text.trim() + "\n", sshPublicKey = "", sshKeyFingerprint = ""))
+                    importKey = false
+                }) { Text("Übernehmen") }
+            },
+            dismissButton = { TextButton(onClick = { importKey = false }) { Text("Abbrechen") } },
         )
     }
     ConfirmDialog(confirm) { confirm = null }

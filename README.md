@@ -46,6 +46,8 @@ Nextcloud, Immich und Kopia lassen sich komplett in der App einrichten (Bereiche
 
 *Agent → Nach Updates suchen → Jetzt installieren.* Der Agent lädt `servercontrol-agent.tar.gz` aus dem neuesten Release, prüft die neue Datei, ersetzt sich selbst (alte Version bleibt als `.bak`) und startet neu. Für dieses private Repository braucht der Server dafür ein GitHub-Token: *github.com → Settings → Developer settings → Fine-grained tokens*, nur Repository `servercontrol`, Berechtigung **Contents: Read-only**. Alternativ *Datei hochladen …* mit dem Archiv aus dem Release.
 
+**App aktualisieren:** auf derselben Seite unter *App aktualisieren*. Die App lädt ihr Paket (APK, MSI bzw. DEB) über den Agent aus dem neuesten Release – sie braucht dafür kein eigenes Token. Android fragt beim ersten Mal, ob ServerControl Apps installieren darf; unter Windows startet der Installer und die App beendet sich.
+
 Die allererste Umstellung von 1.0.0 auf eine Version mit Update-Funktion geht noch manuell: neues Archiv entpacken und `sudo sh install.sh servercontrol-agent-linux-amd64` erneut ausführen (die Konfiguration bleibt erhalten).
 
 ## 2. App installieren
@@ -79,7 +81,7 @@ Bereich *SSH-Schlüssel* (Erzeugung wie bei ConnectBot, Ed25519 empfohlen, alter
 2. *Auf dem Server eintragen* – der Agent schreibt den öffentlichen Schlüssel in `~<benutzer>/.ssh/authorized_keys` (richtige Rechte, vorherige Version als `authorized_keys.servercontrol-backup`).
 3. Unter *Eingetragene Schlüssel* lassen sich Schlüssel anderer Geräte (z. B. PC) hinzufügen oder austragen.
 
-Für jedes Gerät einen eigenen Schlüssel verwenden. Die Passwort-Anmeldung erst abschalten, wenn sich alle Geräte per Schlüssel anmelden.
+Für jedes Gerät einen eigenen Schlüssel verwenden. Das Terminal der App meldet sich nur noch per Schlüssel an. Wenn sich alle Geräte per Schlüssel anmelden, lässt sich unter *Eingetragene Schlüssel* die Passwort-Anmeldung per SSH für den ganzen Server abschalten (Datei `/etc/ssh/sshd_config.d/00-servercontrol.conf`, wird vor dem Neuladen mit `sshd -t` geprüft) und bei Bedarf wieder einschalten.
 
 ## 6. Passwörter
 

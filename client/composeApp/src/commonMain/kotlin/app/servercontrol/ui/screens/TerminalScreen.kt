@@ -37,7 +37,8 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import app.servercontrol.AppState
-import app.servercontrol.CredentialFields
+import app.servercontrol.SecretField
+import app.servercontrol.Section
 import app.servercontrol.Session
 import app.servercontrol.SshAuth
 import app.servercontrol.SshHostKeyUnknown
@@ -98,52 +99,38 @@ private fun SshConnectForm(state: AppState, session: Session) {
     var host by remember { mutableStateOf(hostOf(session.api.baseUrl)) }
     var port by remember { mutableStateOf(profile.sshPort.toString()) }
     var user by remember { mutableStateOf(profile.sshUser) }
-    var password by remember { mutableStateOf("") }
-    var useKey by remember { mutableStateOf(profile.sshPrivateKey.isNotBlank()) }
-    var key by remember { mutableStateOf(profile.sshPrivateKey) }
+    var passphrase by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var hostKeyAsk by remember { mutableStateOf<Pair<SshHostKeyUnknown, CompletableDeferred<Boolean>>?>(null) }
+    val hasKey = session.profile.sshPrivateKey.isNotBlank()
+    // keys generated in the app are not passphrase-protected; imported ones may be
+    val imported = hasKey && session.profile.sshPublicKey.isBlank()
 
+    // SSH login is key-only: the private key lives encrypted in the profile
     fun connect() {
-        if (busy || user.isBlank()) return
+        if (busy || user.isBlank() || !hasKey) return
         busy = true
         error = null
         scope.launch {
             val term = state.terminalSession()
-            val auth = SshAuth(
-                user.trim(),
-                password = if (useKey) null else password,
-                privateKey = if (useKey) key else null,
-                passphrase = if (useKey) password else null,
-            )
+            val auth = SshAuth(user.trim(), password = null, privateKey = session.profile.sshPrivateKey, passphrase = passphrase.ifEmpty { null })
             val p = port.toIntOrNull() ?: 22
             try {
-                var pinned = session.profile.sshHostKey
                 try {
-                    term.connect(host.trim(), p, auth, pinned)
+                    term.connect(host.trim(), p, auth, session.profile.sshHostKey)
                 } catch (e: SshHostKeyUnknown) {
                     val d = CompletableDeferred<Boolean>()
                     hostKeyAsk = e to d
                     val ok = d.await()
                     hostKeyAsk = null
                     if (!ok) throw Exception("Hostschlüssel nicht bestätigt.")
-                    pinned = e.fingerprint
-                    term.connect(host.trim(), p, auth, pinned)
+                    term.connect(host.trim(), p, auth, e.fingerprint)
                     state.updateSessionProfile(session.profile.copy(sshHostKey = e.fingerprint, sshHostKeyType = e.keyType))
                 }
-                // remember user/port/key (never the password)
-                val cur = session.profile
-                val keyChanged = useKey && key.trim() != cur.sshPrivateKey.trim()
-                val np = cur.copy(
-                    sshUser = user.trim(), sshPort = p,
-                    // a password login never removes a stored key; a pasted different key replaces the generated one
-                    sshPrivateKey = if (useKey) key.trim() + "\n" else cur.sshPrivateKey,
-                    sshPublicKey = if (keyChanged) "" else cur.sshPublicKey,
-                    sshKeyFingerprint = if (keyChanged) "" else cur.sshKeyFingerprint,
-                )
+                val np = session.profile.copy(sshUser = user.trim(), sshPort = p)
                 if (np != session.profile) state.updateSessionProfile(np)
-                password = ""
+                passphrase = ""
             } catch (e: Throwable) {
                 error = e.message ?: e.toString()
             } finally {
@@ -165,29 +152,19 @@ private fun SshConnectForm(state: AppState, session: Session) {
                 OutlinedTextField(host, { host = it }, Modifier.weight(1f), label = { Text("Host") }, singleLine = true)
                 OutlinedTextField(port, { port = it.filter { c -> c.isDigit() }.take(5) }, Modifier.width(96.dp), label = { Text("Port") }, singleLine = true)
             }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Switch(useKey, { useKey = it })
-                Spacer(Modifier.width(8.dp))
-                Text("Mit privatem Schlüssel anmelden")
-            }
-            if (useKey) {
-                var showKey by remember { mutableStateOf(false) }
-                OutlinedTextField(
-                    key, { key = it }, Modifier.fillMaxWidth(), label = { Text("Privater Schlüssel (OpenSSH/PEM)") },
-                    minLines = if (showKey) 3 else 1, maxLines = if (showKey) 6 else 1,
-                    textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                    visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
-                    trailingIcon = {
-                        IconButton(onClick = { showKey = !showKey }) {
-                            Icon(if (showKey) Icons.Default.VisibilityOff else Icons.Default.Visibility, if (showKey) "Verbergen" else "Anzeigen")
-                        }
-                    },
-                    supportingText = { Text("Wird verschlüsselt im Profil gespeichert. Das Feld „Passwort“ dient dann als Passphrase.") },
+            OutlinedTextField(user, { user = it.trim() }, Modifier.fillMaxWidth(), label = { Text("Benutzer") }, singleLine = true)
+            if (!hasKey) {
+                Text("Die Anmeldung erfolgt per SSH-Schlüssel. Für dieses Gerät ist noch keiner hinterlegt.", color = MaterialTheme.colorScheme.error)
+                Button(onClick = { state.section = Section.SSH_KEYS }, modifier = Modifier.fillMaxWidth()) { Text("Zu den SSH-Schlüsseln") }
+            } else {
+                Text(
+                    "Anmeldung mit dem Schlüssel dieses Geräts" +
+                        (session.profile.sshKeyFingerprint.takeIf { it.isNotBlank() }?.let { " ($it)" } ?: " (importiert)"),
+                    style = MaterialTheme.typography.bodySmall,
                 )
+                if (imported) SecretField(passphrase, { passphrase = it }, "Passphrase (nur bei geschütztem Schlüssel)")
+                Button(onClick = { connect() }, enabled = !busy && user.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("Verbinden") }
             }
-            if (useKey) Text("Das Passwortfeld dient als Passphrase des Schlüssels.", style = MaterialTheme.typography.bodySmall)
-            CredentialFields(user, { user = it }, password, { password = it }, onSubmit = { connect() })
-            Button(onClick = { connect() }, enabled = !busy && user.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("Verbinden") }
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             if (session.profile.sshHostKey.isNotBlank()) {

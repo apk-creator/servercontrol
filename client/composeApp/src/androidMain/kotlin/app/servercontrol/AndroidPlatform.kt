@@ -1,6 +1,7 @@
 package app.servercontrol
 
 import android.content.Context
+import android.content.Intent
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.text.InputType
@@ -241,3 +242,24 @@ actual suspend fun pickFile(): ByteArray? {
 }
 
 actual val ioDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.IO
+
+// ---------------- app self-update ----------------
+
+actual val appUpdateAssetPattern: Regex? = Regex("""^ServerControl\.apk$""")
+
+actual suspend fun installAppUpdate(api: app.servercontrol.net.ApiClient, assetName: String, onProgress: (Long, Long) -> Unit): String {
+    val ctx = AppContext.app
+    val dir = File(ctx.cacheDir, "updates").apply { mkdirs() }
+    val file = File(dir, "ServerControl.apk")
+    withContext(Dispatchers.IO) {
+        file.outputStream().buffered().use { out ->
+            api.download("/api/agent/release/asset?name=$assetName", { b, n -> out.write(b, 0, n) }, onProgress)
+        }
+    }
+    val uri = androidx.core.content.FileProvider.getUriForFile(ctx, "${ctx.packageName}.files", file)
+    val intent = Intent(Intent.ACTION_VIEW)
+        .setDataAndType(uri, "application/vnd.android.package-archive")
+        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+    ctx.startActivity(intent)
+    return "Die Installation wurde gestartet. Falls Android nachfragt: „Unbekannte Apps installieren“ für ServerControl erlauben."
+}

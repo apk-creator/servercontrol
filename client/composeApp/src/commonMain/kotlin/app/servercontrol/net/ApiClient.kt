@@ -6,14 +6,17 @@ import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.timeout
 import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.header
+import io.ktor.client.request.prepareGet
 import io.ktor.client.request.request
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
+import io.ktor.client.statement.bodyAsChannel
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpMethod
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
+import io.ktor.utils.io.readAvailable
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -82,6 +85,35 @@ class ApiClient(
             contentType(ContentType.Application.OctetStream)
             setBody(data)
         }
+
+    /** Streams a (large) download to [sink]; [onProgress] gets (bytes so far, total or -1). */
+    suspend fun download(
+        path: String,
+        sink: (ByteArray, Int) -> Unit,
+        onProgress: (Long, Long) -> Unit = { _, _ -> },
+    ) {
+        http.prepareGet(baseUrl.trimEnd('/') + path) {
+            timeout { requestTimeoutMillis = 30 * 60_000L; socketTimeoutMillis = 120_000L }
+            token?.let { header("Authorization", "Bearer $it") }
+        }.execute { resp ->
+            if (!resp.status.isSuccess()) {
+                throw ApiException(resp.status.value, extractError(resp.bodyAsText()) ?: "HTTP ${resp.status.value}")
+            }
+            val total = resp.headers["Content-Length"]?.toLongOrNull() ?: -1L
+            val ch = resp.bodyAsChannel()
+            val buf = ByteArray(64 * 1024)
+            var done = 0L
+            while (true) {
+                val n = ch.readAvailable(buf, 0, buf.size)
+                if (n < 0) break
+                if (n > 0) {
+                    sink(buf, n)
+                    done += n
+                    onProgress(done, total)
+                }
+            }
+        }
+    }
 
     suspend fun ping(timeoutMs: Long): Boolean = runCatching {
         raw(HttpMethod.Get, "/api/ping", timeoutMs = timeoutMs).contains("servercontrol-agent")

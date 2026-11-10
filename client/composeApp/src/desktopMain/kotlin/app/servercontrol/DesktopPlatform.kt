@@ -207,3 +207,32 @@ actual val ioDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.corout
 
 actual fun readCrashReport(): String? = null
 actual fun clearCrashReport() {}
+
+// ---------------- app self-update ----------------
+
+actual val appUpdateAssetPattern: Regex? = when {
+    isWindows -> Regex("""^ServerControl-[0-9.]+\.msi$""")
+    osName.contains("linux") -> Regex("""^servercontrol_[0-9.]+-[0-9]+_amd64\.deb$""")
+    else -> null
+}
+
+actual suspend fun installAppUpdate(api: app.servercontrol.net.ApiClient, assetName: String, onProgress: (Long, Long) -> Unit): String {
+    val file = File(System.getProperty("java.io.tmpdir"), assetName)
+    withContext(Dispatchers.IO) {
+        file.outputStream().buffered().use { out ->
+            api.download("/api/agent/release/asset?name=$assetName", { b, n -> out.write(b, 0, n) }, onProgress)
+        }
+    }
+    return if (isWindows) {
+        // the installer replaces the program files, so ServerControl closes itself
+        ProcessBuilder("msiexec", "/i", file.absolutePath, "/passive").start()
+        Thread {
+            Thread.sleep(1500)
+            kotlin.system.exitProcess(0)
+        }.start()
+        "Installer gestartet – ServerControl wird beendet. Nach der Installation bitte neu starten."
+    } else {
+        ProcessBuilder("xdg-open", file.absolutePath).start()
+        "Paket heruntergeladen (${file.absolutePath}) und an die Softwareverwaltung übergeben."
+    }
+}
