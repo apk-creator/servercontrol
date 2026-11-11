@@ -10,6 +10,9 @@ import app.servercontrol.data.ServerProfile
 import app.servercontrol.net.ApiClient
 import app.servercontrol.net.ConnectionManager
 import app.servercontrol.terminal.TerminalSession
+import app.servercontrol.ui.bool
+import app.servercontrol.ui.get
+import app.servercontrol.ui.str
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -60,6 +63,23 @@ class AppState(
         private set
     var screen by mutableStateOf<Screen>(Screen.Profiles)
     var section by mutableStateOf(Section.OVERVIEW)
+
+    /** sections visited before, for the back key */
+    val sectionHistory = androidx.compose.runtime.mutableStateListOf<Section>()
+
+    fun navigate(to: Section) {
+        if (to == section) return
+        sectionHistory.remove(to)
+        sectionHistory.add(section)
+        if (sectionHistory.size > 30) sectionHistory.removeAt(0)
+        section = to
+    }
+
+    fun back(): Boolean {
+        if (sectionHistory.isEmpty()) return false
+        section = sectionHistory.removeAt(sectionHistory.lastIndex)
+        return true
+    }
     var session by mutableStateOf<Session?>(null)
         private set
     var busy by mutableStateOf<String?>(null)
@@ -159,7 +179,9 @@ class AppState(
         vault = vault.copy(lastProfileId = prof.id)
         persist()
         section = Section.OVERVIEW
+        sectionHistory.clear()
         screen = Screen.Main
+        checkUpdates()
     }
 
     private val renewLock = Mutex()
@@ -181,9 +203,9 @@ class AppState(
             // 401: device was removed on the server or the password was changed → password needed again
             if (e.status == 401) forgetDevice(profileId)
             null
-        } catch (e: Throwable) {
-            null
         }
+        // network errors (e.g. agent just restarting) propagate: the caller retries later,
+        // the device is kept and the session is not ended
     }
 
     private suspend fun forgetDevice(profileId: String) {
@@ -247,6 +269,7 @@ class AppState(
 
     private suspend fun expire() {
         val s = session ?: return
+        updateReport = null
         cancelAppUpdate()
         closeTerminal()
         session = null
@@ -258,6 +281,7 @@ class AppState(
     /** Explicit sign-out: also forgets this device, the next sign-in needs the password. */
     fun logout() = scope.launch {
         val s = session ?: return@launch
+        updateReport = null
         cancelAppUpdate()
         closeTerminal()
         runCatching { s.api.postRaw("/api/logout?forget=1") }
@@ -265,6 +289,89 @@ class AppState(
         conn.close()
         forgetDevice(s.profile.id)
         screen = Screen.Login(vault.profiles.find { it.id == s.profile.id } ?: s.profile)
+    }
+
+    // ---------------- update check (app, agent, Nextcloud, Immich, system) ----------------
+
+    var updateReport by mutableStateOf<UpdateReport?>(null)
+        private set
+    var updatesChecking by mutableStateOf(false)
+        private set
+    /** summary already seen/dismissed – the notice shows again only for new updates */
+    var updateNoticeSeen by mutableStateOf("")
+    /** set by the "Updates verfügbar" notification */
+    var openUpdatesWhenReady by mutableStateOf(false)
+
+    fun checkUpdates() {
+        val s = session ?: return
+        if (updatesChecking) return
+        updatesChecking = true
+        scope.launch {
+            try {
+                updateReport = checkAllUpdates(s.api, s.modules, app.servercontrol.ui.screens.currentTimeMs())
+            } catch (e: Throwable) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+            } finally {
+                updatesChecking = false
+            }
+        }
+    }
+
+    // ---------------- agent self-update ----------------
+
+    /** status text while the agent updates itself */
+    var agentUpdating by mutableStateOf<String?>(null)
+        private set
+    var agentUpdateResult by mutableStateOf<Pair<Boolean, String>?>(null)
+
+    fun startAgentUpdate() {
+        val s = session ?: return
+        if (agentUpdating != null) return
+        var target = updateReport?.agentLatest
+        agentUpdateResult = null
+        agentUpdating = "Agent lädt das Release …"
+        scope.launch {
+            try {
+                // answers at once (new agents) – old agents answer after the install
+                runCatching { s.api.postRaw("/api/agent/update/install", timeoutMs = 300_000) }
+                    .onFailure { e -> if (e is app.servercontrol.net.ApiException && e.status in 400..499) throw e }
+                val deadline = app.servercontrol.ui.screens.currentTimeMs() + 5 * 60_000
+                while (agentUpdateResult == null && app.servercontrol.ui.screens.currentTimeMs() < deadline) {
+                    kotlinx.coroutines.delay(3_000)
+                    try {
+                        val st = s.api.getJson("/api/agent/update/status", 10_000)
+                        st["target"].str.takeIf { it.isNotBlank() }?.let { target = it }
+                        val cur = st["current"].str
+                        val t = target
+                        when {
+                            t != null && cur.isNotBlank() && app.servercontrol.ui.screens.compareVersions(cur, t) >= 0 ->
+                                agentUpdateResult = true to "Der Agent läuft jetzt mit Version $cur."
+                            st["error"].str.isNotBlank() -> agentUpdateResult = false to st["error"].str
+                            st["running"].bool == false && st["target"].str.isNotBlank() -> agentUpdating = "Agent startet neu …"
+                        }
+                    } catch (e: Throwable) {
+                        if (e is kotlinx.coroutines.CancellationException) throw e
+                        // old agent without status endpoint, or restarting right now
+                        if (e is app.servercontrol.net.ApiException && e.status == 404) {
+                            val cur = runCatching { s.api.getJson("/api/config")["version"].str }.getOrDefault("")
+                            val t = target
+                            if (t != null && cur.isNotBlank() && app.servercontrol.ui.screens.compareVersions(cur, t) >= 0) {
+                                agentUpdateResult = true to "Der Agent läuft jetzt mit Version $cur."
+                            }
+                        } else {
+                            agentUpdating = "Agent startet neu …"
+                        }
+                    }
+                }
+                if (agentUpdateResult == null) agentUpdateResult = false to "Keine neue Version gemeldet. Details im Systemprotokoll (Dienst servercontrol-agent)."
+            } catch (e: Throwable) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                agentUpdateResult = false to (e.message ?: e.toString())
+            } finally {
+                agentUpdating = null
+                checkUpdates()
+            }
+        }
     }
 
     // ---------------- in-app update ----------------

@@ -9,7 +9,7 @@ plugins {
 }
 
 // release tags have two parts (v1.8); installers need MAJOR.MINOR.PATCH
-val appVersion = "1.8"
+val appVersion = "1.9"
 val ktor = "3.1.3"
 
 // APP_VERSION constant for the in-app updater
@@ -50,6 +50,7 @@ kotlin {
             implementation(jsch)
             // ConnectBot's terminal (libvterm, selection with magnifier, IME handling)
             implementation("org.connectbot:termlib:0.3.14")
+            implementation("androidx.work:work-runtime-ktx:2.10.1")
             // ed25519 / curve25519 for SSH on older Android versions
             implementation("org.bouncycastle:bcprov-jdk18on:1.80")
         }

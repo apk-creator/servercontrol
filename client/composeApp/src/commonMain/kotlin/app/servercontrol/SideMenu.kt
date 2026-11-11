@@ -40,6 +40,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.layout.Box
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -141,6 +142,11 @@ fun SideMenu(state: AppState, sections: List<Section>, onSelect: (Section) -> Un
                         Icon(s.icon(), null, Modifier.size(20.dp))
                         Spacer(Modifier.width(10.dp))
                         Text(s.title, maxLines = 1, style = MaterialTheme.typography.labelLarge)
+                        // dot: updates available
+                        if (s == Section.UPDATES && state.updateReport?.summary?.isNotEmpty() == true) {
+                            Spacer(Modifier.width(6.dp))
+                            Box(Modifier.size(7.dp).clip(androidx.compose.foundation.shape.CircleShape).background(app.servercontrol.ui.StatusWarn))
+                        }
                     }
                 }
             }

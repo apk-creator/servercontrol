@@ -160,7 +160,7 @@ private fun SshConnectForm(state: AppState, session: Session) {
             OutlinedTextField(user, { user = it.trim() }, Modifier.fillMaxWidth(), label = { Text("Benutzer") }, singleLine = true)
             if (!hasKey) {
                 Text("Die Anmeldung erfolgt per SSH-Schlüssel. Für dieses Gerät ist noch keiner hinterlegt.", color = MaterialTheme.colorScheme.error)
-                Button(onClick = { state.section = Section.SSH_KEYS }, modifier = Modifier.fillMaxWidth()) { Text("Zu den SSH-Schlüsseln") }
+                Button(onClick = { state.navigate(Section.SSH_KEYS) }, modifier = Modifier.fillMaxWidth()) { Text("Zu den SSH-Schlüsseln") }
             } else {
                 Text(
                     "Anmeldung mit dem Schlüssel dieses Geräts" +

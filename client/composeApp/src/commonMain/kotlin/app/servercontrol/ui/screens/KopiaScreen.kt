@@ -7,7 +7,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.runtime.LaunchedEffect
 import kotlinx.serialization.json.JsonElement
@@ -36,6 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.servercontrol.BackHandler
 import app.servercontrol.Bold
 import app.servercontrol.ButtonRow
 import app.servercontrol.SecretField
@@ -85,7 +86,7 @@ fun KopiaScreen(api: ApiClient) {
                         },
                         trailing = {
                             IconButton(onClick = { edit = KopiaRepoDef(r.id, r.name, r.configFile, r.passwordFile, r.sources) }) {
-                                Icon(Icons.Default.Edit, "Bearbeiten")
+                                Icon(Icons.Default.Settings, "Einstellungen")
                             }
                         },
                         onClick = { open = r },
@@ -270,29 +271,29 @@ private fun KopiaRepoDetail(api: ApiClient, repo: KopiaRepo, onBack: () -> Unit)
     var editSchedule by remember { mutableStateOf<Pair<String, JsonElement?>?>(null) }
     var editMaint by remember { mutableStateOf<JsonElement?>(null) }
     val base = "/api/kopia/repos/${repo.id}"
+    var maintAsk by remember { mutableStateOf(false) }
+    BackHandler { onBack() }
     Column(Modifier.fillMaxSize()) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Zurück") }
-            Text(repo.name, fontWeight = Bold)
-        }
-        // actions as separate buttons at the top
-        FlowRow(
-            Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+        Text(repo.name, Modifier.padding(start = 16.dp, top = 8.dp), fontWeight = Bold)
+        // all actions in one row
+        Row(
+            Modifier.fillMaxWidth().padding(start = 8.dp, end = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             Button(onClick = {
                 confirm = Confirm("Snapshot starten?",
                     if (repo.sources.isEmpty()) "Alle bekannten Quellen in ${repo.name} sichern." else "Sicherung von ${repo.sources.joinToString()}") {
                     host.post("Snapshot", "$base/snapshot")
                 }
-            }, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)) { Text("Snapshot starten") }
-            SmallButton("Kurzwartung", { host.post("Kurzwartung", "$base/quick-maintenance") })
-            SmallButton("Wartung", {
-                confirm = Confirm("Vollständige Wartung starten?", "Räumt abgelaufene Snapshots und nicht mehr benötigte Daten auf. Kann bei großen Repositories lange dauern.") {
-                    host.post("Wartung", "$base/maintenance")
+            }, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)) { Text("Snapshot", maxLines = 1) }
+            SmallButton("Verifizieren", {
+                confirm = Confirm("Repository verifizieren?", "Liest 1 % der gespeicherten Daten zurück und prüft sie. Weckt die Platte.") {
+                    host.post("Verifizieren", "$base/verify", """{"percent":1}""")
                 }
             })
+            SmallButton("Wartung", { maintAsk = true })
+            Spacer(Modifier.weight(1f))
             RefreshButton { tick++ }
         }
         Loader(repo.id to tick, {
@@ -301,7 +302,7 @@ private fun KopiaRepoDetail(api: ApiClient, repo: KopiaRepo, onBack: () -> Unit)
                 api.get<List<KopiaSnapshot>>("$base/snapshots", timeoutMs = 180_000),
                 Unit,
             )
-        }) { (status, snaps, _), reload ->
+        }) { (status, snaps, _), _ ->
             val bySource = snaps.groupBy { it.source?.path ?: "?" }
                 .mapValues { (_, l) -> l.sortedByDescending { isoToMs(it.startTime) ?: 0L } }
             val sources = (repo.sources + bySource.keys).distinct().filter { it != "?" }
@@ -311,47 +312,46 @@ private fun KopiaRepoDetail(api: ApiClient, repo: KopiaRepo, onBack: () -> Unit)
                         status["error"]?.let { Text(it.str, color = StatusBad) }
                         val st = status["status"]
                         val d = status["drive"]
-                        val drive = if (d == null) "–" else buildString {
-                            append(d["disk"].str.ifBlank { d["device"].str })
-                            d["model"].str.takeIf { it.isNotBlank() }?.let { append(" · $it") }
-                            d["rotational"].bool?.let { append(if (it) " · HDD" else " · SSD") }
-                            val total = d["total"].long ?: 0
-                            if (total > 0) append(" · ${(100 * (d["used"].long ?: 0) / total)} % belegt (${formatBytes(d["used"].long)} / ${formatBytes(total)})")
-                        }
+                        val total = d["total"].long ?: 0
                         KeyValues(
-                            "Pfad" to st["storage"]["config"]["path"].str.ifBlank { st["storage"]["type"].str },
-                            "Laufwerk" to drive,
+                            "Verzeichnis" to st["storage"]["config"]["path"].str.ifBlank { st["storage"]["type"].str },
+                            "Laufwerk" to (d["disk"].str.ifBlank { d["device"].str }.ifBlank { "–" }),
+                            "Name" to (d["model"].str.ifBlank { "–" } + (d["rotational"].bool?.let { if (it) " (HDD)" else " (SSD)" } ?: "")),
+                            "Ausnutzung" to if (total > 0) "${100 * (d["used"].long ?: 0) / total} % · ${formatBytes(d["used"].long)} von ${formatBytes(total)}" else "–",
                             "Konfiguration" to repo.configFile,
                         )
-                        ButtonRow {
-                            SmallButton("Verifizieren (1 %)", { host.post("Verifizieren", "$base/verify", """{"percent":1}""") })
-                        }
                     }
                 }
                 sources.forEach { src ->
                     val list = bySource[src].orEmpty()
+                    val suffix = if (sources.size > 1) " · $src" else ""
                     item(key = "src-$src") {
-                        SectionCard(if (sources.size > 1) "Sicherung · $src" else "Sicherung", stateKey = "kopia-src") {
+                        SectionCard("Sicherung$suffix", stateKey = "kopia-src") {
                             KeyValues(
-                                "Startpfad" to src,
+                                "Verzeichnis" to src,
                                 "Snapshots" to if (list.isEmpty()) "keine" else "${list.size} · letzter ${localTime(list.first().startTime)} · ${formatBytes(list.first().totalSize)}",
                             )
                             if (sources.size > 1) ButtonRow {
                                 SmallButton("Nur diese Quelle sichern", { host.post("Snapshot $src", "$base/snapshot", """{"source":${jsonString(src)}}""") })
                             }
+                        }
+                    }
+                    item(key = "snaps-$src") {
+                        SectionCard("Snapshots$suffix", stateKey = "kopia-snaps") {
+                            if (list.isEmpty()) Text("Keine Snapshots vorhanden.", fontSize = TextSmall)
                             list.forEachIndexed { i, s ->
                                 Row(
-                                    Modifier.fillMaxWidth().background(stripe(i)).clickable { restore = s }.padding(horizontal = 4.dp, vertical = 4.dp),
+                                    Modifier.fillMaxWidth().background(stripe(i)).clickable { restore = s }.padding(start = 4.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    Column(Modifier.weight(1f)) {
+                                    Column(Modifier.weight(1f).padding(vertical = 4.dp)) {
                                         Text(localTime(s.startTime))
                                         Text("${formatBytes(s.totalSize)} · ${s.files ?: "?"} Dateien" +
                                             (if ((s.errors ?: 0) > 0) " · ${s.errors} Fehler" else "") +
                                             (s.retention?.takeIf { it.isNotEmpty() }?.let { " · " + it.joinToString() } ?: ""),
                                             fontSize = TextSmall, color = if ((s.errors ?: 0) > 0) StatusWarn else MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
-                                    Icon(Icons.Default.MoreVert, "Wiederherstellen oder löschen", Modifier.size(20.dp))
+                                    IconButton(onClick = { restore = s }) { Icon(Icons.Default.Settings, "Wiederherstellen oder löschen", Modifier.size(20.dp)) }
                                 }
                             }
                         }
@@ -359,13 +359,15 @@ private fun KopiaRepoDetail(api: ApiClient, repo: KopiaRepo, onBack: () -> Unit)
                 }
                 if (snaps.isEmpty() && sources.isEmpty()) item { Text("Keine Snapshots vorhanden.", Modifier.padding(16.dp)) }
                 item(key = "schedules") {
-                    SectionCard("Zeitpläne", stateKey = "kopia-schedules") {
+                    SectionCard("Zeitplan", stateKey = "kopia-schedules") {
                         val srcIds = snaps.mapNotNull { sourceId(it.source) }.distinct()
                         if (srcIds.isEmpty()) Text("Zeitpläne gelten je Sicherung; sie erscheinen nach dem ersten Snapshot.", fontSize = TextSmall)
-                        srcIds.forEach { id -> ScheduleBlock(api, base, id, tick) { pol -> editSchedule = id to pol } }
+                        srcIds.forEach { id -> ScheduleBlock(api, base, id, tick, srcIds.size > 1) { pol -> editSchedule = id to pol } }
+                    }
+                }
+                item(key = "maintenance") {
+                    SectionCard("Wartung", stateKey = "kopia-maint") {
                         val m = status["maintenance"]
-                        HorizontalDivider()
-                        Text("Wartung", fontWeight = Bold)
                         val rows = mutableListOf(
                             "Kurzwartung" to (if (m["quick"]["enabled"].bool == true) "alle ${hoursOf(m["quick"]["interval"].long)}" else "aus"),
                             "Wartung" to (if (m["full"]["enabled"].bool == true) "alle ${hoursOf(m["full"]["interval"].long)}" else "aus"),
@@ -376,7 +378,7 @@ private fun KopiaRepoDetail(api: ApiClient, repo: KopiaRepo, onBack: () -> Unit)
                             if (last != null) rows += "Zuletzt $k" to localTime(last["end"].str) + if (last["success"].bool == false) " ✗" else " ✓"
                         }
                         rows.forEachIndexed { i, (k, v) -> KeyValue(k, v, i) }
-                        Text("Hinweis: Laufen die Wartungen über eigene Skripte (z. B. nach dem Snapshot), hier „aus“ lassen.", fontSize = TextSmall)
+                        Text("Laufen die Wartungen über eigene Skripte (z. B. nach dem Snapshot), hier „aus“ lassen.", fontSize = TextSmall)
                         ButtonRow { SmallButton("Wartung einstellen", { editMaint = m ?: kotlinx.serialization.json.JsonObject(emptyMap()) }) }
                     }
                 }
@@ -390,6 +392,18 @@ private fun KopiaRepoDetail(api: ApiClient, repo: KopiaRepo, onBack: () -> Unit)
     editMaint?.let { m ->
         MaintenanceEditor(base, m, host) { editMaint = null; tick++ }
     }
+    if (maintAsk) AppDialog(
+        onDismissRequest = { maintAsk = false },
+        title = { Text("Wartung starten") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Kurzwartung räumt Indexe auf und geht schnell. Die vollständige Wartung entfernt außerdem abgelaufene Snapshots und nicht mehr benötigte Daten – das kann bei großen Repositories lange dauern.", fontSize = TextSmall)
+                Button(onClick = { maintAsk = false; host.post("Kurzwartung", "$base/quick-maintenance") }, Modifier.fillMaxWidth()) { Text("Kurzwartung") }
+                Button(onClick = { maintAsk = false; host.post("Wartung", "$base/maintenance") }, Modifier.fillMaxWidth()) { Text("Vollständige Wartung") }
+            }
+        },
+        confirmButton = { TextButton(onClick = { maintAsk = false }) { Text("Abbrechen") } },
+    )
     restore?.let { s ->
         var target by remember(s.id) { mutableStateOf("/tmp/restore-${s.id.take(8)}") }
         AppDialog(
@@ -424,13 +438,13 @@ private fun KopiaRepoDetail(api: ApiClient, repo: KopiaRepo, onBack: () -> Unit)
 
 /** Snapshot schedule and retention of one source (effective policy). */
 @Composable
-private fun ScheduleBlock(api: ApiClient, base: String, source: String, tick: Int, onEdit: (JsonElement?) -> Unit) {
+private fun ScheduleBlock(api: ApiClient, base: String, source: String, tick: Int, showTitle: Boolean, onEdit: (JsonElement?) -> Unit) {
     var pol by remember(source, tick) { mutableStateOf<JsonElement?>(null) }
     var err by remember(source, tick) { mutableStateOf<String?>(null) }
     LaunchedEffect(source, tick) {
         try { pol = api.getJson("$base/schedule?source=${encQ(source)}") } catch (e: Throwable) { err = e.message }
     }
-    Text(source.substringAfter(':'), fontWeight = Bold)
+    if (showTitle) Text(source.substringAfter(':'), fontWeight = Bold)
     err?.let { Text(it, color = StatusBad, fontSize = TextSmall) }
     val p = pol ?: run { if (err == null) LinearProgressIndicator(Modifier.fillMaxWidth()); return }
     val sch = p["scheduling"]
@@ -438,13 +452,17 @@ private fun ScheduleBlock(api: ApiClient, base: String, source: String, tick: In
     val interval = sch["intervalSeconds"].long?.takeIf { it > 0 }?.let { hoursOf(it * 1_000_000_000) }
     val cron = sch["cron"].arr.joinToString("; ") { it.str }
     val ret = p["retention"]
-    fun k(n: String) = ret[n].long?.toString() ?: "–"
+    // Retention: only values greater than 1, e.g. "täglich 14"
+    val retention = listOf("keepLatest" to "letzte", "keepHourly" to "stündlich", "keepDaily" to "täglich",
+        "keepWeekly" to "wöchentlich", "keepMonthly" to "monatlich", "keepAnnual" to "jährlich")
+        .mapNotNull { (key, label) -> ret[key].long?.takeIf { it > 1 }?.let { "$label $it" } }
+        .joinToString(" · ")
     val rows = listOfNotNull(
         "Uhrzeiten" to times.ifBlank { "–" },
         interval?.let { "Intervall" to "alle $it" },
         cron.takeIf { it.isNotBlank() }?.let { "Crontab" to it },
         if (sch["manual"].bool == true) "Modus" to "nur manuell" else null,
-        "Aufbewahrung" to "letzte ${k("keepLatest")} · stündl. ${k("keepHourly")} · tägl. ${k("keepDaily")} · wöch. ${k("keepWeekly")} · monatl. ${k("keepMonthly")} · jährl. ${k("keepAnnual")}",
+        "Retention" to retention.ifBlank { "–" },
     )
     rows.forEachIndexed { i, (a, b) -> KeyValue(a, b, i) }
     ButtonRow { SmallButton("Zeitplan einstellen", { onEdit(p) }) }
@@ -476,7 +494,7 @@ private fun ScheduleEditor(api: ApiClient, base: String, source: String, pol: Js
                 OutlinedTextField(interval, { interval = it.filter(Char::isDigit).take(4) }, Modifier.fillMaxWidth(),
                     label = { Text("Zusätzlich alle … Stunden (0 = kein Intervall)") }, singleLine = true)
                 OutlinedTextField(cron, { cron = it }, Modifier.fillMaxWidth(), label = { Text("Crontab (optional, z. B. 0 1 * * *)") }, singleLine = true)
-                Text("Aufbewahrung (Anzahl Snapshots)", fontWeight = Bold)
+                Text("Retention (Anzahl Snapshots)", fontWeight = Bold)
                 keys.chunked(2).forEach { pair ->
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         pair.forEach { (k, label) ->

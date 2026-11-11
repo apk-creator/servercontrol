@@ -271,9 +271,13 @@ fun KeyValues(vararg rows: Pair<String, String>?) {
 }
 
 @Composable
-fun UsageBar(label: String, used: Long, total: Long, detail: String) {
+fun UsageBar(label: String, used: Long, total: Long, detail: String, index: Int = -1) {
     val p = pct(used, total)
-    Column {
+    Column(
+        Modifier.fillMaxWidth()
+            .background(if (index >= 0) stripe(index) else Color.Transparent, androidx.compose.foundation.shape.RoundedCornerShape(4.dp))
+            .padding(horizontal = 4.dp, vertical = 4.dp),
+    ) {
         Row(verticalAlignment = Alignment.CenterVertically) { Text(label, Modifier.weight(1f)); Text(detail, fontSize = TextSmall) }
         LinearProgressIndicator(
             progress = { p },

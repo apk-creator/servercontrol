@@ -178,50 +178,8 @@ fun AgentScreen(state: app.servercontrol.AppState, api: ApiClient) {
                     "Kopia-Repos" to cfg["kopiaCount"].str,
                     "Root-Befehle" to if (cfg["allowShell"].bool == true) "erlaubt (allowShell)" else "aus",
                 )
+                Text("App- und Agent-Updates stehen unter „Updates“.", fontSize = TextSmall)
             }
-            SectionCard("Agent aktualisieren") {
-                ButtonRow {
-                    SmallButton(if (checking) "Prüfe …" else "Nach Updates suchen", {
-                        checking = true
-                        scope.launch {
-                            check = runCatching { api.getJson("/api/agent/update/check") }.getOrNull()
-                            checking = false
-                        }
-                    }, enabled = !checking)
-                    SmallButton("Datei hochladen …", {
-                        scope.launch {
-                            val data = pickFile() ?: return@launch
-                            confirm = Confirm("Agent aus Datei installieren?",
-                                "${formatBytes(data.size.toLong())} – erwartet wird servercontrol-agent.tar.gz aus einem Release oder die Linux-Binärdatei. " +
-                                    "Der Agent startet danach neu, du musst dich erneut anmelden.") {
-                                host.run("Agent-Update", { updateMessage(AppJson.parseToJsonElement(api.postBytes("/api/agent/update/upload", data))) })
-                            }
-                        }
-                    })
-                }
-                check?.let { c ->
-                    val err = c["error"].str
-                    if (err.isNotBlank()) Text(err, color = StatusBad, fontSize = TextSmall)
-                    else {
-                        KeyValues("Installiert" to c["current"].str, "Neuestes Release" to c["latest"].str + "  (" + c["publishedAt"].str.take(10) + ")")
-                        if (c["newer"].bool == true && c["hasAsset"].bool == true) {
-                            Text("Update verfügbar.", color = StatusWarn, fontWeight = Bold)
-                            c["notes"].str.takeIf { it.isNotBlank() }?.let { Text(it.take(1500), fontSize = TextSmall) }
-                            Button(onClick = {
-                                confirm = Confirm("Agent auf ${c["latest"].str} aktualisieren?",
-                                    "Der Agent lädt das Release von GitHub, ersetzt sich selbst und startet neu. Danach musst du dich erneut anmelden.") {
-                                    host.run("Agent-Update", { updateMessage(AppJson.parseToJsonElement(api.postRaw("/api/agent/update/install"))) })
-                                }
-                            }) { Text("Jetzt installieren") }
-                        } else if (c["newer"].bool == true) {
-                            Text("Das Release enthält keine Agent-Datei.", color = StatusWarn)
-                        } else {
-                            Text("Der Agent ist aktuell.", color = StatusOk)
-                        }
-                    }
-                }
-            }
-            AppUpdateCard(state, check)
             DevicesCard(api)
             SectionCard("Update-Quelle") {
                 Text("Für ein privates Repository braucht der Server ein GitHub-Token mit Lesezugriff (Fine-grained Token: nur dieses Repository, Berechtigung „Contents: Read-only“).", fontSize = TextSmall)
@@ -242,49 +200,6 @@ fun AgentScreen(state: app.servercontrol.AppState, api: ApiClient) {
     }
     ConfirmDialog(confirm) { confirm = null }
     ActionResultDialog(host, api)
-}
-
-/** Update of the app itself: the package is downloaded through the agent (which holds the GitHub token). */
-@Composable
-private fun AppUpdateCard(state: app.servercontrol.AppState, check: JsonElement?) {
-    val pattern = appUpdateAssetPattern ?: return
-    val progress = state.appUpdate
-    SectionCard("App aktualisieren") {
-        KeyValue("Installiert", APP_VERSION, 0)
-        if (progress != null) {
-            if (progress.running) {
-                Text("Lädt ${progress.asset} – läuft auch im Hintergrund weiter.", fontSize = TextSmall)
-                if (progress.total > 0) {
-                    LinearProgressIndicator(progress = { (progress.done.toFloat() / progress.total).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
-                } else {
-                    LinearProgressIndicator(Modifier.fillMaxWidth())
-                }
-                Text("${formatBytes(progress.done)}${if (progress.total > 0) " von ${formatBytes(progress.total)}" else ""}", fontSize = TextSmall)
-                SmallButton("Abbrechen", { state.cancelAppUpdate() })
-            } else {
-                Text(
-                    if (progress.ok) progress.message ?: "Fertig." else "Update fehlgeschlagen: ${progress.message}",
-                    color = if (progress.ok) StatusOk else StatusBad, fontSize = TextSmall,
-                )
-                SmallButton("OK", { state.dismissAppUpdate() })
-            }
-            return@SectionCard
-        }
-        if (check == null) {
-            Text("Oben „Nach Updates suchen“ tippen.", fontSize = TextSmall)
-            return@SectionCard
-        }
-        val latest = check["latest"].str
-        val asset = check["assets"].arr.map { it["name"].str }.firstOrNull { pattern.matches(it) }
-        if (latest.isNotBlank()) KeyValue("Neuestes Release", latest, 1)
-        val newer = latest.isNotBlank() && compareVersions(latest, APP_VERSION) > 0
-        when {
-            latest.isBlank() -> {}
-            asset == null -> Text("Im Release ist kein Paket für diese Plattform.", color = StatusWarn, fontSize = TextSmall)
-            !newer -> Text("Die App ist aktuell.", color = StatusOk)
-            else -> Button(onClick = { state.startAppUpdate(asset) }) { Text("App auf $latest aktualisieren") }
-        }
-    }
 }
 
 /** Installations that stay signed in (remembered devices). */

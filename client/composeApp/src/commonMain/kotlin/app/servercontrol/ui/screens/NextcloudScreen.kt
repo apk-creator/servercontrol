@@ -29,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.servercontrol.Bold
+import app.servercontrol.BackHandler
 import app.servercontrol.ButtonRow
 import app.servercontrol.CredentialFields
 import app.servercontrol.SmallButton
@@ -100,9 +101,6 @@ fun NextcloudMain(api: ApiClient, onSetup: () -> Unit) {
 
 @Composable
 private fun NcStatus(api: ApiClient, host: ActionHost, ask: (Confirm) -> Unit) {
-    var upd by remember { mutableStateOf<JsonElement?>(null) }
-    var checking by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
     Loader(host.result == null, { api.getJson("$NC/status") }) { st, reload ->
         Column(Modifier.verticalScroll(rememberScrollState())) {
             SectionCard("Nextcloud", actions = { RefreshButton(reload) }) {
@@ -116,48 +114,6 @@ private fun NcStatus(api: ApiClient, host: ActionHost, ask: (Confirm) -> Unit) {
                 ButtonRow {
                     if (maint) SmallButton("Wartungsmodus aus", { host.post("Wartungsmodus aus", "$NC/action/maintenance-off", after = reload) })
                     else SmallButton("Wartungsmodus an", { ask(Confirm("Wartungsmodus aktivieren?", "Benutzer können Nextcloud dann nicht nutzen.") { host.post("Wartungsmodus an", "$NC/action/maintenance-on", after = reload) }) })
-                    SmallButton(if (checking) "Prüfe …" else "Nach Updates suchen", {
-                        checking = true
-                        scope.launch {
-                            upd = runCatching { api.getJson("$NC/updatecheck") }.getOrElse { e ->
-                                kotlinx.serialization.json.buildJsonObject { put("stderr", e.message ?: e.toString()) }
-                            }
-                            checking = false
-                        }
-                    }, enabled = !checking)
-                }
-            }
-            upd?.let { u ->
-                SectionCard("Updates") {
-                    val server = u["server"].str
-                    val apps = u["apps"].arr
-                    if (server.isBlank() && apps.isEmpty()) {
-                        Text(u["stdout"].str.ifBlank { u["stderr"].str }.ifBlank { "Alles aktuell." }.trim(), fontSize = TextSmall)
-                    }
-                    if (server.isNotBlank()) {
-                        Text("Nextcloud $server ist verfügbar.", fontWeight = Bold, color = StatusWarn)
-                        if (u["updaterAvailable"].bool == true) {
-                            Button(onClick = {
-                                ask(Confirm("Nextcloud auf $server aktualisieren?",
-                                    "Der Updater schaltet den Wartungsmodus ein, lädt die neue Version, führt „occ upgrade“ aus und schaltet den Wartungsmodus wieder aus. " +
-                                        "Vorher sollte ein aktuelles Backup existieren. Das kann einige Minuten dauern.") {
-                                    host.post("Nextcloud-Update", "$NC/action/server-update")
-                                })
-                            }) { Text("Nextcloud aktualisieren") }
-                        } else {
-                            Text("Der Updater (updater/updater.phar neben occ) wurde nicht gefunden.", fontSize = TextSmall)
-                        }
-                    }
-                    if (apps.isNotEmpty()) {
-                        Text("${apps.size} App-Updates", fontWeight = Bold)
-                        apps.forEachIndexed { i, a ->
-                            Row(Modifier.fillMaxWidth().background(stripe(i)).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Text("${a["app"].str} → ${a["version"].str}", Modifier.weight(1f))
-                                TextButton(onClick = { host.post("Update ${a["app"].str}", "$NC/action/app-update", """{"app":${jsonString(a["app"].str)}}""") }) { Text("Update") }
-                            }
-                        }
-                        Button(onClick = { host.post("App-Updates", "$NC/action/app-update-all") }) { Text("Alle Apps aktualisieren") }
-                    }
                 }
             }
             SectionCard("Einrichtungsprüfung") {
@@ -358,7 +314,7 @@ fun NextcloudScreen(api: ApiClient) {
         val mod = cfg["nextcloud"]
         if (mod["enabled"].bool != true || setup) {
             Column(Modifier.fillMaxSize()) {
-                if (setup) TextButton(onClick = { setup = false }) { Text("← Zurück") }
+                BackHandler(setup) { setup = false }
                 NextcloudSetup(api, mod) { setup = false; refresh++ }
             }
         } else {
