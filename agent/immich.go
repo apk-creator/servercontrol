@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -92,4 +93,46 @@ func (s *Server) handleImmich(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(resp.StatusCode)
 	_, _ = io.Copy(w, io.LimitReader(resp.Body, 8<<20))
+}
+
+// Immich runs with docker compose; the update pulls the images and recreates the containers.
+
+func immichComposeDir(r *http.Request) (string, string) {
+	bin := containerBin()
+	if bin == "" {
+		return "", ""
+	}
+	res := run(r.Context(), 20*time.Second, nil, bin, "ps", "-a",
+		"--filter", "label=com.docker.compose.service=immich-server",
+		"--format", `{{.Label "com.docker.compose.project.working_dir"}}`)
+	dir := strings.TrimSpace(strings.SplitN(res.Stdout, "\n", 2)[0])
+	return bin, dir
+}
+
+// GET /api/immich-compose – compose directory and the pinned IMMICH_VERSION from .env
+func (s *Server) handleImmichCompose(w http.ResponseWriter, r *http.Request) {
+	_, dir := immichComposeDir(r)
+	out := map[string]any{"dir": dir}
+	if dir != "" {
+		if b, err := os.ReadFile(filepath.Join(dir, ".env")); err == nil {
+			for _, l := range strings.Split(string(b), "\n") {
+				if v, ok := strings.CutPrefix(strings.TrimSpace(l), "IMMICH_VERSION="); ok {
+					out["immichVersion"] = strings.Trim(v, `"' `)
+				}
+			}
+		}
+	}
+	writeJSON(w, 200, out)
+}
+
+// POST /api/immich-compose/update – docker compose pull && up -d (as a job)
+func (s *Server) handleImmichComposeUpdate(w http.ResponseWriter, r *http.Request) {
+	bin, dir := immichComposeDir(r)
+	if dir == "" || !filepath.IsAbs(dir) {
+		writeErr(w, 404, "Immich-Compose-Projekt nicht gefunden (Container immich-server)")
+		return
+	}
+	logf("immich compose update in %s", dir)
+	jobStarted(w, s.jobs.Start("Immich: Update (compose pull + up)", time.Hour, nil,
+		"sh", "-c", `cd "$1" && "$2" compose pull && "$2" compose up -d && "$2" image prune -f`, "sh", dir, bin))
 }

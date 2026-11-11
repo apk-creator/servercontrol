@@ -100,11 +100,9 @@ fun OverviewScreen(api: ApiClient, goTo: (Section) -> Unit) {
         }
         if (o.rebootRequired || o.failedUnits > 0) {
             SectionCard("Hinweise") {
-                if (o.rebootRequired) Text("Neustart erforderlich (nach Updates).", color = StatusWarn)
-                if (o.failedUnits > 0) Text(
-                    "${o.failedUnits} fehlgeschlagene Dienste – anzeigen",
-                    color = StatusBad, modifier = Modifier.clickable { goTo(Section.SERVICES) },
-                )
+                var h = 0
+                if (o.rebootRequired) KeyValue("Neustart", "erforderlich (nach Updates)", h++, StatusWarn)
+                if (o.failedUnits > 0) KeyValue("Dienste", "${o.failedUnits} fehlgeschlagen – anzeigen", h++, StatusBad) { goTo(Section.SERVICES) }
             }
         }
         SectionCard("System") {
@@ -126,21 +124,22 @@ fun OverviewScreen(api: ApiClient, goTo: (Section) -> Unit) {
             }
         }
         SectionCard("Auslastung") {
+            var n = 0
             Column(Modifier.clickable { popup = "cores" }) {
-                UsageBar("CPU  ›", (o.cpuPercent * 10).toLong(), 1000, "${(o.cpuPercent * 10).roundToInt() / 10.0} %")
+                UsageBar("CPU  ›", (o.cpuPercent * 10).toLong(), 1000, "${(o.cpuPercent * 10).roundToInt() / 10.0} %", n++)
             }
             val used = o.memTotal - o.memAvailable
-            UsageBar("Arbeitsspeicher", used, o.memTotal, "${formatBytes(used)} / ${formatBytes(o.memTotal)}")
+            UsageBar("Arbeitsspeicher", used, o.memTotal, "${formatBytes(used)} / ${formatBytes(o.memTotal)}", n++)
             if (o.swapTotal > 0) {
                 val su = o.swapTotal - o.swapFree
-                UsageBar("Swap", su, o.swapTotal, "${formatBytes(su)} / ${formatBytes(o.swapTotal)}")
+                UsageBar("Swap", su, o.swapTotal, "${formatBytes(su)} / ${formatBytes(o.swapTotal)}", n++)
             }
             UsageBar("Festplatten-I/O", (o.disk.busy * 10).toLong(), 1000,
-                "${o.disk.busy.roundToInt()} % · ↓ ${formatBytes(o.disk.read.toLong())}/s ↑ ${formatBytes(o.disk.write.toLong())}/s")
+                "${o.disk.busy.roundToInt()} % · ↓ ${formatBytes(o.disk.read.toLong())}/s ↑ ${formatBytes(o.disk.write.toLong())}/s", n++)
         }
         if (o.filesystems.isNotEmpty()) SectionCard("Festplatten") {
-            o.filesystems.forEach { m ->
-                UsageBar(m.mount, m.used, m.total, "${formatBytes(m.used)} / ${formatBytes(m.total)}")
+            o.filesystems.forEachIndexed { i, m ->
+                UsageBar(m.mount, m.used, m.total, "${formatBytes(m.used)} / ${formatBytes(m.total)}", i)
             }
         }
         hist?.let { h ->
@@ -149,12 +148,12 @@ fun OverviewScreen(api: ApiClient, goTo: (Section) -> Unit) {
             val strong = MaterialTheme.colorScheme.onSurface
             val weak = MaterialTheme.colorScheme.outline
             SectionCard("Verlauf (1 Stunde)") {
-                ChartBlock("CPU", "${o.cpuPercent.roundToInt()} %", listOf(ChartSeries(pts.map { it.cpu }, strong, fill = true)), cap, 100.0)
-                ChartBlock("Arbeitsspeicher", "${pts.lastOrNull()?.mem?.roundToInt() ?: 0} %", listOf(ChartSeries(pts.map { it.mem }, strong, fill = true)), cap, 100.0)
+                ChartBlock("CPU", "${o.cpuPercent.roundToInt()} %", listOf(ChartSeries(pts.map { it.cpu }, strong, fill = true)), cap, 100.0, 0)
+                ChartBlock("Arbeitsspeicher", "${pts.lastOrNull()?.mem?.roundToInt() ?: 0} %", listOf(ChartSeries(pts.map { it.mem }, strong, fill = true)), cap, 100.0, 1)
                 ChartBlock("Festplatten  (lesen ━ / schreiben ━ grau)", "↓ ${formatBytes(o.disk.read.toLong())}/s  ↑ ${formatBytes(o.disk.write.toLong())}/s",
-                    listOf(ChartSeries(pts.map { it.diskRead }, strong), ChartSeries(pts.map { it.diskWrite }, weak)), cap)
+                    listOf(ChartSeries(pts.map { it.diskRead }, strong), ChartSeries(pts.map { it.diskWrite }, weak)), cap, index = 2)
                 ChartBlock("Netzwerk  (empfangen ━ / senden ━ grau)", "↓ ${formatBytes(o.net.rx.toLong())}/s  ↑ ${formatBytes(o.net.tx.toLong())}/s",
-                    listOf(ChartSeries(pts.map { it.netRx }, strong), ChartSeries(pts.map { it.netTx }, weak)), cap)
+                    listOf(ChartSeries(pts.map { it.netRx }, strong), ChartSeries(pts.map { it.netTx }, weak)), cap, index = 3)
             }
         }
         Spacer(Modifier.heightIn(min = 24.dp))
@@ -169,7 +168,7 @@ fun OverviewScreen(api: ApiClient, goTo: (Section) -> Unit) {
                     Text("${o.cpuModel} · gesamt ${o.cpuPercent.roundToInt()} %", fontSize = TextSmall)
                     if (o.cores.isEmpty()) Text("Noch keine Messwerte – gleich noch einmal öffnen.")
                     o.cores.forEachIndexed { i, v ->
-                        UsageBar("Kern ${i + 1}", (v * 10).toLong(), 1000, "${v.roundToInt()} %")
+                        UsageBar("Kern ${i + 1}", (v * 10).toLong(), 1000, "${v.roundToInt()} %", i)
                     }
                 }
             },
@@ -436,10 +435,8 @@ fun StorageScreen(api: ApiClient) {
     Loader(Unit, { api.getJson("/api/system/storage") }) { data, reload ->
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
             SectionCard("Dateisysteme", actions = { RefreshButton(reload) }) {
-                AppJson.decodeFromJsonElement<List<MountInfo>>(data["mounts"] ?: kotlinx.serialization.json.JsonArray(emptyList())).forEach { m ->
-                    UsageBar("${m.mount}  (${m.fstype})", m.used, m.total, "${formatBytes(m.used)} / ${formatBytes(m.total)} · frei ${formatBytes(m.free)}")
-                    Text(m.device, style = MaterialTheme.typography.bodySmall)
-                    Spacer(Modifier.heightIn(min = 4.dp))
+                AppJson.decodeFromJsonElement<List<MountInfo>>(data["mounts"] ?: kotlinx.serialization.json.JsonArray(emptyList())).forEachIndexed { i, m ->
+                    UsageBar("${m.mount}  (${m.fstype}) · ${m.device}", m.used, m.total, "${formatBytes(m.used)} / ${formatBytes(m.total)} · frei ${formatBytes(m.free)}", i)
                 }
             }
             SectionCard("Laufwerke") {
@@ -616,39 +613,6 @@ fun ProcessesScreen(api: ApiClient) {
 }
 
 // ======================= Updates =======================
-
-@Composable
-fun UpdatesScreen(api: ApiClient) {
-    val host = rememberActionHost { api }
-    var confirm by remember { mutableStateOf<Confirm?>(null) }
-    Loader(host.result == null, { api.get<UpdatesInfo>("/api/system/updates") }) { u, reload ->
-        Column(Modifier.fillMaxSize()) {
-            SectionCard("Systemupdates", actions = { RefreshButton(reload) }) {
-                Text(if (u.packages.isEmpty()) "System ist aktuell." else "${u.packages.size} Updates verfügbar (${u.packages.count { it.Security }} Sicherheit)", fontWeight = Bold)
-                if (u.rebootRequired) Text("Neustart erforderlich.", color = StatusWarn)
-                ButtonRow {
-                    SmallButton("Paketlisten aktualisieren", { host.post("apt update", "/api/system/updates/refresh") })
-                    if (u.packages.isNotEmpty()) {
-                        SmallButton("Installieren", { confirm = Confirm("Updates installieren?", "apt-get upgrade für ${u.packages.size} Pakete.") { host.post("Upgrade", "/api/system/updates/upgrade") } })
-                        SmallButton("Full-Upgrade", { confirm = Confirm("Full-Upgrade ausführen?", "apt-get full-upgrade kann auch Pakete entfernen oder neu installieren.") { host.post("Full-Upgrade", "/api/system/updates/upgrade?mode=full") } })
-                    }
-                    if (u.rebootRequired) SmallButton("Neustart", { confirm = Confirm("Server neu starten?", "Neustart in 5 Sekunden.") { host.post("Neustart", "/api/system/power/reboot") } })
-                }
-            }
-            LazyColumn {
-                itemsIndexed(u.packages) { i, p ->
-                    StripedItem(
-                        i,
-                        headline = { Text(p.Name, color = if (p.Security) StatusBad else MaterialTheme.colorScheme.onSurface) },
-                        supporting = { Text("${p.OldVersion} → ${p.NewVersion}\n${p.Origin}", fontSize = TextSmall) },
-                    )
-                }
-            }
-        }
-    }
-    ConfirmDialog(confirm) { confirm = null }
-    ActionResultDialog(host, api)
-}
 
 // ======================= Accounts =======================
 

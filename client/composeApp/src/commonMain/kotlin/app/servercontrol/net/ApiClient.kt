@@ -47,7 +47,9 @@ class ApiClient(
     ): Pair<Int, String> {
         val resp: HttpResponse = http.request(baseUrl.trimEnd('/') + path) {
             this.method = method
-            timeout { requestTimeoutMillis = timeoutMs }
+            // socket timeout too: OkHttp's default read timeout (10 s) cut off slow answers
+            // ("socket timeout has expired", e.g. agent update, occ update:check)
+            timeout { requestTimeoutMillis = timeoutMs; socketTimeoutMillis = timeoutMs }
             token?.let { header("Authorization", "Bearer $it") }
             if (body != null) {
                 contentType(ContentType.Application.Json)
@@ -96,12 +98,12 @@ class ApiClient(
     suspend inline fun <reified T> get(path: String, timeoutMs: Long = 60_000): T =
         AppJson.decodeFromString(raw(HttpMethod.Get, path, timeoutMs = timeoutMs))
 
-    suspend fun getJson(path: String): JsonElement = AppJson.parseToJsonElement(raw(HttpMethod.Get, path))
+    suspend fun getJson(path: String, timeoutMs: Long = 60_000): JsonElement = AppJson.parseToJsonElement(raw(HttpMethod.Get, path, timeoutMs = timeoutMs))
 
     suspend inline fun <reified T> post(path: String, body: String? = null, timeoutMs: Long = 120_000): T =
         AppJson.decodeFromString(raw(HttpMethod.Post, path, body ?: "{}", timeoutMs))
 
-    suspend fun postRaw(path: String, body: String? = null): String = raw(HttpMethod.Post, path, body ?: "{}", 120_000)
+    suspend fun postRaw(path: String, body: String? = null, timeoutMs: Long = 120_000): String = raw(HttpMethod.Post, path, body ?: "{}", timeoutMs)
     suspend fun putRaw(path: String, body: String): String = raw(HttpMethod.Put, path, body)
     suspend fun deleteRaw(path: String): String = raw(HttpMethod.Delete, path)
 

@@ -199,7 +199,10 @@ func (s *Server) routes() http.Handler {
 	// self-update
 	priv.HandleFunc("GET /api/agent/update/check", s.handleUpdateCheck)
 	priv.HandleFunc("POST /api/agent/update/install", s.handleUpdateInstall)
+	priv.HandleFunc("GET /api/agent/update/status", s.handleUpdateStatus)
 	priv.HandleFunc("POST /api/agent/update/upload", s.handleUpdateUpload)
+	priv.HandleFunc("GET /api/immich-compose", s.handleImmichCompose)
+	priv.HandleFunc("POST /api/immich-compose/update", s.handleImmichComposeUpdate)
 	// immich (allowlisted proxy)
 	priv.HandleFunc("/api/immich/{path...}", s.handleImmich)
 

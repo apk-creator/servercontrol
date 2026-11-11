@@ -26,7 +26,6 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.*
@@ -169,7 +168,7 @@ fun ProfilesScreen(state: AppState) {
                         })
                     },
                     leadingContent = { Icon(Icons.Default.Dns, null) },
-                    trailingContent = { IconButton(onClick = { editing = p }) { Icon(Icons.Default.Edit, "Bearbeiten") } },
+                    trailingContent = { IconButton(onClick = { editing = p }) { Icon(Icons.Default.Settings, "Einstellungen") } },
                     modifier = Modifier.clickable { state.openProfile(p) },
                 )
             }
@@ -233,9 +232,9 @@ fun LoginScreen(state: AppState, profile: ServerProfile) {
     Scaffold(topBar = {
         TopAppBar(
             title = { Text(profile.name) },
-            navigationIcon = { IconButton(onClick = { state.screen = Screen.Profiles }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Zurück") } },
         )
     }) { pad ->
+        BackHandler { state.screen = Screen.Profiles }
         Box(Modifier.padding(pad).consumeWindowInsets(pad).imePadding().fillMaxSize(), contentAlignment = Alignment.TopCenter) {
             Column(Modifier.widthIn(max = 420.dp).padding(24.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Anmelden bei ${profile.name}", style = MaterialTheme.typography.titleLarge)
@@ -290,10 +289,27 @@ fun MainScreen(state: AppState) {
         }
     }
 
+    // daily update check while the app is open; notification tap opens the Updates section
+    LaunchedEffect(session) {
+        while (true) {
+            kotlinx.coroutines.delay(24 * 3_600_000L)
+            state.checkUpdates()
+        }
+    }
+    LaunchedEffect(state.openUpdatesWhenReady) {
+        if (state.openUpdatesWhenReady) {
+            state.openUpdatesWhenReady = false
+            state.navigate(Section.UPDATES)
+        }
+    }
+    // back: previous section; an open menu closes first (registered later = handled first)
+    BackHandler(state.sectionHistory.isNotEmpty()) { state.back() }
+    BackHandler(drawer.targetValue == DrawerValue.Open) { scope.launch { drawer.close() } }
+
     BoxWithConstraints {
         val wide = maxWidth > 840.dp
         val nav: @Composable () -> Unit = {
-            SideMenu(state, sections) { s -> state.section = s; scope.launch { drawer.close() } }
+            SideMenu(state, sections) { s -> state.navigate(s); scope.launch { drawer.close() } }
         }
         val content: @Composable () -> Unit = {
             Scaffold(topBar = {
@@ -317,7 +333,10 @@ fun MainScreen(state: AppState) {
                             Text(state.busy ?: "", Modifier.padding(12.dp))
                         }
                     } else {
-                        SectionContent(state, session)
+                        Column(Modifier.fillMaxSize()) {
+                            UpdateNotice(state)
+                            Box(Modifier.weight(1f)) { SectionContent(state, session) }
+                        }
                     }
                 }
             }
@@ -330,11 +349,29 @@ fun MainScreen(state: AppState) {
     }
 }
 
+/** "Updates verfügbar" after sign-in (and after each check that finds something new). */
+@Composable
+private fun UpdateNotice(state: AppState) {
+    val sum = state.updateReport?.summary.orEmpty()
+    val sig = sum.joinToString("|")
+    if (sum.isEmpty() || state.section == Section.UPDATES || state.updateNoticeSeen == sig) return
+    Card(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
+        Row(Modifier.padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Updates verfügbar", fontWeight = FontWeight.SemiBold)
+                Text(sum.joinToString(" · "), style = MaterialTheme.typography.bodySmall)
+            }
+            TextButton(onClick = { state.updateNoticeSeen = sig; state.navigate(Section.UPDATES) }) { Text("Anzeigen") }
+            IconButton(onClick = { state.updateNoticeSeen = sig }) { Icon(Icons.Default.Close, "Ausblenden") }
+        }
+    }
+}
+
 @Composable
 fun SectionContent(state: AppState, session: Session) {
     val api = session.api
     when (state.section) {
-        Section.OVERVIEW -> OverviewScreen(api) { state.section = it }
+        Section.OVERVIEW -> OverviewScreen(api) { state.navigate(it) }
         Section.TERMINAL -> TerminalScreen(state, session)
         Section.SSH_KEYS -> SshKeysScreen(state, session)
         Section.AGENT -> AgentScreen(state, api)
@@ -344,7 +381,7 @@ fun SectionContent(state: AppState, session: Session) {
         Section.STORAGE -> StorageScreen(api)
         Section.NETWORK -> NetworkScreen(api)
         Section.PROCESSES -> ProcessesScreen(api)
-        Section.UPDATES -> UpdatesScreen(api)
+        Section.UPDATES -> UpdatesScreen(state, api)
         Section.ACCOUNTS -> AccountsScreen(api)
         Section.KOPIA -> KopiaScreen(api)
         Section.NEXTCLOUD -> NextcloudScreen(api)

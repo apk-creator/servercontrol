@@ -134,12 +134,57 @@ func (s *Server) handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// POST /api/agent/update/install – download the agent from the latest release and install it
+var updateState struct {
+	sync.Mutex
+	Running bool   `json:"running"`
+	Error   string `json:"error"`
+	Message string `json:"message"`
+	Target  string `json:"target"`
+}
+
+// POST /api/agent/update/install – starts download + install in the background and answers at once
+// (the download from GitHub can take longer than a client timeout; the agent restarts afterwards)
 func (s *Server) handleUpdateInstall(w http.ResponseWriter, r *http.Request) {
-	rel, err := s.latestRelease(r.Context())
-	if err != nil {
-		writeErr(w, 502, err.Error())
+	updateState.Lock()
+	if updateState.Running {
+		updateState.Unlock()
+		writeErr(w, 409, "Update läuft bereits")
 		return
+	}
+	updateState.Running, updateState.Error, updateState.Message, updateState.Target = true, "", "Lade Release …", ""
+	updateState.Unlock()
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+		res, err := s.downloadAndInstall(ctx)
+		updateState.Lock()
+		defer updateState.Unlock()
+		updateState.Running = false
+		if err != nil {
+			updateState.Error = err.Error()
+			logf("agent update failed: %v", err)
+			return
+		}
+		updateState.Message, _ = res["message"].(string)
+		updateState.Target, _ = res["newVersion"].(string)
+	}()
+	writeJSON(w, 202, map[string]any{"ok": true, "started": true, "current": version})
+}
+
+// GET /api/agent/update/status
+func (s *Server) handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
+	updateState.Lock()
+	defer updateState.Unlock()
+	writeJSON(w, 200, map[string]any{
+		"current": version, "running": updateState.Running, "error": updateState.Error,
+		"message": updateState.Message, "target": updateState.Target,
+	})
+}
+
+func (s *Server) downloadAndInstall(ctx context.Context) (map[string]any, error) {
+	rel, err := s.latestRelease(ctx)
+	if err != nil {
+		return nil, err
 	}
 	var assetURL string
 	for _, a := range rel.Assets {
@@ -148,25 +193,21 @@ func (s *Server) handleUpdateInstall(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if assetURL == "" {
-		writeErr(w, 404, "Release "+rel.TagName+" enthält kein "+agentAsset)
-		return
+		return nil, fmt.Errorf("Release %s enthält kein %s", rel.TagName, agentAsset)
 	}
-	resp, err := s.ghRequest(r.Context(), assetURL, "application/octet-stream")
+	resp, err := s.ghRequest(ctx, assetURL, "application/octet-stream")
 	if err != nil {
-		writeErr(w, 502, err.Error())
-		return
+		return nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		writeErr(w, 502, fmt.Sprintf("Download fehlgeschlagen (HTTP %d)", resp.StatusCode))
-		return
+		return nil, fmt.Errorf("Download fehlgeschlagen (HTTP %d)", resp.StatusCode)
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 100<<20))
 	if err != nil {
-		writeErr(w, 502, err.Error())
-		return
+		return nil, err
 	}
-	s.install(w, r, data)
+	return installBinary(ctx, data)
 }
 
 // POST /api/agent/update/upload – body is the release tarball or the bare binary
@@ -208,37 +249,53 @@ func extractBinary(data []byte) ([]byte, error) {
 }
 
 func (s *Server) install(w http.ResponseWriter, r *http.Request, data []byte) {
-	if !updateMu.TryLock() {
-		writeErr(w, 409, "Update läuft bereits")
+	res, err := installBinary(r.Context(), data)
+	if err != nil {
+		code := 500
+		var ce codeErr
+		if errors.As(err, &ce) {
+			code = ce.code
+		}
+		writeErr(w, code, err.Error())
 		return
+	}
+	writeJSON(w, 200, res)
+}
+
+type codeErr struct {
+	code int
+	msg  string
+}
+
+func (e codeErr) Error() string { return e.msg }
+
+func installBinary(ctx context.Context, data []byte) (map[string]any, error) {
+	if !updateMu.TryLock() {
+		return nil, codeErr{409, "Update läuft bereits"}
 	}
 	defer updateMu.Unlock()
 
 	bin, err := extractBinary(data)
 	if err != nil {
-		writeErr(w, 400, err.Error())
-		return
+		return nil, codeErr{400, err.Error()}
 	}
 	exe, err := os.Executable()
 	if err == nil {
 		exe, err = filepath.EvalSymlinks(exe)
 	}
 	if err != nil {
-		writeErr(w, 500, err.Error())
-		return
+		return nil, err
 	}
 	newPath := exe + ".new"
 	if err := os.WriteFile(newPath, bin, 0o755); err != nil {
-		writeErr(w, 500, err.Error())
-		return
+		return nil, err
 	}
 	// sanity check: the new binary must start and report a version
-	res := run(r.Context(), 15*time.Second, nil, newPath, "-version")
+	res := run(ctx, 15*time.Second, nil, newPath, "-version")
 	newVer := strings.TrimSpace(res.Stdout)
 	if res.ExitCode != 0 || newVer == "" {
 		_ = os.Remove(newPath)
-		writeErr(w, 400, "Neue Binärdatei startet nicht: "+strings.TrimSpace(res.Stderr))
-		return
+		return nil, codeErr{400, "Neue Binärdatei startet nicht: " + strings.TrimSpace(res.Stderr)}
 	}
 	_ = os.Remove(exe + ".bak")
 	if err := os.Link(exe, exe+".bak"); err != nil {
@@ -248,19 +305,17 @@ func (s *Server) install(w http.ResponseWriter, r *http.Request, data []byte) {
 		}
 	}
 	if err := os.Rename(newPath, exe); err != nil {
-		writeErr(w, 500, err.Error())
-		return
+		return nil, err
 	}
 	logf("agent updated %s -> %s, restarting", version, newVer)
-	restart := run(r.Context(), 10*time.Second, nil, "systemd-run", "--on-active=2", "systemctl", "restart", "servercontrol-agent.service")
+	restart := run(ctx, 10*time.Second, nil, "systemd-run", "--on-active=2", "systemctl", "restart", "servercontrol-agent.service")
 	msg := "Agent wird in 2 Sekunden neu gestartet."
 	if restart.ExitCode != 0 {
 		msg = "Installiert, aber Neustart fehlgeschlagen – bitte 'systemctl restart servercontrol-agent' ausführen. " + strings.TrimSpace(restart.Stderr)
 	}
-	writeJSON(w, 200, map[string]any{"ok": true, "oldVersion": version, "newVersion": newVer, "message": msg})
+	return map[string]any{"ok": true, "oldVersion": version, "newVersion": newVer, "message": msg}, nil
 }
 
-// PUT /api/config/update – repository and optional token for update checks
 func (s *Server) handleUpdateConfigSave(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Repo       string `json:"repo"`

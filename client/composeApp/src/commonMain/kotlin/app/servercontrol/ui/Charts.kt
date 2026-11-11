@@ -1,6 +1,7 @@
 package app.servercontrol.ui
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -63,8 +64,12 @@ fun LineChart(series: List<ChartSeries>, capacity: Int, maxY: Double? = null, he
 
 /** Title, current value(s) and the chart. */
 @Composable
-fun ChartBlock(title: String, value: String, series: List<ChartSeries>, capacity: Int, maxY: Double? = null) {
-    Column(Modifier.fillMaxWidth()) {
+fun ChartBlock(title: String, value: String, series: List<ChartSeries>, capacity: Int, maxY: Double? = null, index: Int = -1) {
+    Column(
+        Modifier.fillMaxWidth()
+            .background(if (index >= 0) stripe(index) else Color.Transparent, androidx.compose.foundation.shape.RoundedCornerShape(4.dp))
+            .padding(horizontal = 4.dp, vertical = 4.dp),
+    ) {
         Row(Modifier.fillMaxWidth()) {
             Text(title, Modifier.weight(1f))
             Text(value, fontSize = TextSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

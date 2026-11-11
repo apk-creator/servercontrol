@@ -1,6 +1,7 @@
 package app.servercontrol
 
 import android.app.Application
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -19,6 +20,7 @@ class ServerControlApp : Application() {
         // Errors in background coroutines are recorded instead of killing the app.
         val handler = kotlinx.coroutines.CoroutineExceptionHandler { _, e -> CrashLog.record("Fehler in Hintergrundaufgabe", e) }
         state = AppState(AndroidSecureStore(this), MainScope() + handler)
+        runCatching { UpdateCheckWorker.schedule(this) }.onFailure { CrashLog.record("Update-Prüfung nicht geplant", it) }
     }
 }
 
@@ -37,7 +39,27 @@ class MainActivity : ComponentActivity() {
             FilePicker.pending?.complete(uri)
             FilePicker.pending = null
         }
+        // back: previous view/section; at the start the app goes to the background (SSH sessions stay open)
+        onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (!BackStack.handle()) moveTaskToBack(true)
+            }
+        })
         setContent { App(app.state) }
+        handleIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleIntent(intent)
+    }
+
+    /** "Updates verfügbar" notification opens the Updates section */
+    private fun handleIntent(intent: Intent?) {
+        if (intent?.getBooleanExtra(UpdateCheckWorker.EXTRA_OPEN_UPDATES, false) == true) {
+            (application as ServerControlApp).state.openUpdatesWhenReady = true
+            intent.removeExtra(UpdateCheckWorker.EXTRA_OPEN_UPDATES)
+        }
     }
 
     override fun onResume() {

@@ -70,6 +70,13 @@ fun main() = application {
         title = title,
         state = windowState,
         icon = appIcon,
+        // Escape = back (previous view / section)
+        onPreviewKeyEvent = { e ->
+            e.type == androidx.compose.ui.input.key.KeyEventType.KeyDown &&
+                e.key == androidx.compose.ui.input.key.Key.Escape &&
+                // the terminal needs Escape itself (vim, less …)
+                !(state?.screen == Screen.Main && state?.section == Section.TERMINAL) && BackStack.handle()
+        },
     ) {
         if (s == null) {
             UnlockScreen { pass ->

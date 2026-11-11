@@ -23,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.servercontrol.Bold
+import app.servercontrol.BackHandler
 import app.servercontrol.ButtonRow
 import app.servercontrol.CredentialFields
 import app.servercontrol.SmallButton
@@ -242,7 +243,7 @@ fun ImmichScreen(api: ApiClient) {
         val mod = cfg["immich"]
         if (mod["enabled"].bool != true || setup) {
             Column(Modifier.fillMaxSize()) {
-                if (setup) TextButton(onClick = { setup = false }) { Text("← Zurück") }
+                BackHandler(setup) { setup = false }
                 ImmichSetup(api, mod) { setup = false; refresh++ }
             }
         } else {
