@@ -46,7 +46,7 @@ import kotlinx.coroutines.delay
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.decodeFromJsonElement
 
-private fun enc(s: String) = s.replace("%", "%25").replace(" ", "%20").replace("&", "%26").replace("?", "%3F").replace("#", "%23").replace("/", "%2F")
+private fun enc(s: String) = s.replace("%", "%25").replace("+", "%2B").replace(" ", "%20").replace("&", "%26").replace("?", "%3F").replace("#", "%23").replace("/", "%2F")
 
 // ======================= Overview =======================
 
@@ -249,13 +249,13 @@ fun ServicesScreen(api: ApiClient) {
     Loader(Unit, { api.get<List<ServiceUnit>>("/api/system/services") }) { units, reload ->
         Column(Modifier.fillMaxSize()) {
             Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                OutlinedTextField(filter, { filter = it }, Modifier.weight(1f), label = { Text("Suchen") }, singleLine = true)
+                SearchField(filter, { filter = it }, modifier = Modifier.weight(1f))
                 Spacer(Modifier.width(4.dp))
                 RefreshButton(reload)
             }
             Row(Modifier.padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf("Alle", "Aktiv", "Fehler").forEachIndexed { i, t ->
-                    FilterChip(selected = mode == i, onClick = { mode = i }, label = { Text(t) })
+                    FilterPill(mode == i, { mode = i }, t)
                 }
             }
             val shown = units.filter {
@@ -363,30 +363,35 @@ fun LogsScreen(api: ApiClient) {
     var grep by remember { mutableStateOf("") }
     var prio by remember { mutableStateOf("") }
     var boot by remember { mutableStateOf(false) }
-    var query by remember { mutableStateOf("lines=300") }
-    val prios = listOf("" to "Alle", "3" to "Fehler", "4" to "Warnungen", "6" to "Info")
+    var tick by remember { mutableStateOf(0) }
+    fun build() = buildString {
+        append("lines=500")
+        val u = unit.trim()
+        // "kopia" finds kopia-data1.service, kopia-sys.service … (glob)
+        if (u.isNotBlank()) append("&unit=" + enc(if (u.contains('.') || u.contains('*')) u else "$u*"))
+        if (prio.isNotBlank()) append("&priority=$prio")
+        if (grep.isNotBlank()) append("&grep=" + enc(grep.trim()))
+        if (boot) append("&boot=1")
+    }
+    var query by remember { mutableStateOf("lines=500") }
+    // filters apply by themselves (text after a short pause)
+    LaunchedEffect(unit, grep, prio, boot) {
+        delay(450)
+        query = build()
+    }
+    val prios = listOf("" to "Alle", "3" to "Fehler", "4" to "Warnungen")
     Column(Modifier.fillMaxSize()) {
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(unit, { unit = it.trim() }, Modifier.weight(1f), label = { Text("Dienst (z. B. nginx)") }, singleLine = true)
-                OutlinedTextField(grep, { grep = it }, Modifier.weight(1f), label = { Text("Suchtext") }, singleLine = true)
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                prios.forEach { (v, l) -> FilterChip(prio == v, { prio = v }, label = { Text(l) }) }
-                FilterChip(boot, { boot = !boot }, label = { Text("Seit Boot") })
-                Spacer(Modifier.weight(1f))
-                Button(onClick = {
-                    query = buildString {
-                        append("lines=500")
-                        if (unit.isNotBlank()) append("&unit=" + enc(if (unit.contains('.')) unit else "$unit.service"))
-                        if (prio.isNotBlank()) append("&priority=$prio")
-                        if (grep.isNotBlank()) append("&grep=" + enc(grep))
-                        if (boot) append("&boot=1")
-                    }
-                }) { Text("Anzeigen") }
-            }
+        Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            SearchField(unit, { unit = it }, "Dienst", Modifier.weight(1f))
+            SearchField(grep, { grep = it }, "Suchtext", Modifier.weight(1f))
         }
-        Loader(query, { api.get<List<LogEntry>>("/api/system/logs?$query") }) { entries, _ ->
+        Row(Modifier.padding(start = 12.dp, end = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+            prios.forEach { (v, l) -> FilterPill(prio == v, { prio = v }, l) }
+            FilterPill(boot, { boot = !boot }, "Seit Boot")
+            Spacer(Modifier.weight(1f))
+            RefreshButton { tick++ }
+        }
+        Loader(query to tick, { api.get<List<LogEntry>>("/api/system/logs?$query") }) { entries, _ ->
             if (entries.isEmpty()) Text("Keine Einträge.", Modifier.padding(16.dp))
             LazyColumn(Modifier.fillMaxSize().padding(horizontal = 8.dp), reverseLayout = true) {
                 itemsIndexed(entries.reversed()) { i, e ->
@@ -441,9 +446,22 @@ fun StorageScreen(api: ApiClient) {
             }
             SectionCard("Laufwerke") {
                 data["blockdevices"]["blockdevices"].arr.filter { it["type"].str == "disk" && !it["name"].str.startsWith("zram") }.forEachIndexed { i, d ->
+                    val ds = data["diskStates"][d["path"].str]
                     Column(Modifier.fillMaxWidth().background(stripe(i)).clickable { smartDev = d["path"].str }.padding(6.dp)) {
-                        Text("${d["path"].str}  ·  ${formatBytes(d["size"].long)}", fontWeight = Bold)
-                        Text(listOf(d["model"].str, d["tran"].str.uppercase(), if (d["rota"].bool == true) "HDD" else "SSD")
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("${d["path"].str}  ·  ${formatBytes(d["size"].long)}", Modifier.weight(1f), fontWeight = Bold)
+                            if (ds != null) {
+                                val standby = ds["standby"].bool == true
+                                Text(if (standby) "Standby" else "aktiv", fontSize = TextSmall,
+                                    color = if (standby) MaterialTheme.colorScheme.onSurfaceVariant else StatusOk)
+                                Spacer(Modifier.width(10.dp))
+                                val passed = ds["smartPassed"].bool
+                                Text(when (passed) { true -> "SMART OK"; false -> "SMART FEHLER"; null -> "SMART ?" }, fontSize = TextSmall, fontWeight = Bold,
+                                    color = when (passed) { true -> StatusOk; false -> StatusBad; null -> StatusWarn })
+                            }
+                        }
+                        Text(listOf(d["model"].str, d["tran"].str.uppercase(), if (d["rota"].bool == true) "HDD" else "SSD",
+                            ds["celsius"].str.toDoubleOrNull()?.takeIf { it > 0 }?.let { "${it.roundToInt()} °C" } ?: "")
                             .filter { it.isNotBlank() }.joinToString(" · "), style = MaterialTheme.typography.bodySmall)
                         d["children"].arr.forEach { c ->
                             Text("   └ ${c["name"].str}  ${formatBytes(c["size"].long)}  ${c["fstype"].str}  ${c["mountpoints"].arr.joinToString { it.str }}",
@@ -451,7 +469,7 @@ fun StorageScreen(api: ApiClient) {
                         }
                     }
                 }
-                Text("Tippe auf ein Laufwerk für SMART-Werte.", style = MaterialTheme.typography.bodySmall)
+                Text("Tippe auf ein Laufwerk für SMART-Werte. Platten im Standby werden nicht geweckt; für sie gilt der letzte bekannte SMART-Status.", style = MaterialTheme.typography.bodySmall)
             }
         }
     }
@@ -462,11 +480,19 @@ fun StorageScreen(api: ApiClient) {
 private fun SmartDialog(api: ApiClient, dev: String, onDismiss: () -> Unit) {
     val host = rememberActionHost { api }
     var raw by remember { mutableStateOf(false) }
+    var wake by remember { mutableStateOf(false) }
     AppDialog(
         onDismissRequest = onDismiss,
         title = { Text("SMART $dev") },
         text = {
-            Loader(dev, { api.getJson("/api/system/smart?device=${enc(dev)}") }) { s, _ ->
+            Loader(dev to wake, { api.getJson("/api/system/smart?device=${enc(dev)}" + if (wake) "&wake=1" else "", 60_000) }) { s, _ ->
+                if (s["standby"].bool == true) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Die Platte ist im Standby. Eine SMART-Abfrage würde sie aufwecken.")
+                        SmallButton("Trotzdem abfragen", { wake = true })
+                    }
+                    return@Loader
+                }
                 Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     val passed = s["smart_status"]["passed"].bool
                     Text(
@@ -571,8 +597,8 @@ fun ProcessesScreen(api: ApiClient) {
     LaunchedEffect(sort) { while (true) { delay(5_000); tick++ } }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.padding(start = 12.dp, end = 8.dp, top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            FilterChip(sort == "cpu", { sort = "cpu" }, label = { Text("nach CPU") })
-            FilterChip(sort == "mem", { sort = "mem" }, label = { Text("nach RAM") })
+            FilterPill(sort == "cpu", { sort = "cpu" }, "nach CPU")
+            FilterPill(sort == "mem", { sort = "mem" }, "nach RAM")
             Spacer(Modifier.weight(1f))
             RefreshButton { tick++ }
         }

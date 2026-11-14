@@ -121,8 +121,9 @@ func (s *Server) handleNcMaintWindowSet(w http.ResponseWriter, r *http.Request) 
 	var req struct {
 		StartUtc int `json:"startUtc"`
 	}
-	if err := readJSON(r, &req); err != nil || req.StartUtc < -1 || req.StartUtc > 23 {
-		writeErr(w, 400, "startUtc must be 0..23 or -1")
+	// 100 = no window (heavy jobs may run at any time), -1 = remove the setting
+	if err := readJSON(r, &req); err != nil || req.StartUtc < -1 || (req.StartUtc > 23 && req.StartUtc != 100) {
+		writeErr(w, 400, "startUtc must be 0..23, 100 or -1")
 		return
 	}
 	logf("nextcloud maintenance window → %d", req.StartUtc)

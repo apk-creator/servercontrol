@@ -176,6 +176,7 @@ func countCPUs() int {
 // ======================= Services (systemd) =======================
 
 var unitRe = regexp.MustCompile(`^[A-Za-z0-9@._:\\-]+$`)
+var logUnitRe = regexp.MustCompile(`^[A-Za-z0-9@._:*\\-]+$`)
 
 func handleServices(w http.ResponseWriter, r *http.Request) {
 	res := run(r.Context(), 15*time.Second, nil, "systemctl", "list-units", "--type=service", "--all", "--output=json", "--no-pager")
@@ -248,7 +249,8 @@ func handleLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	args := []string{"--no-pager", "-o", "json", "-n", strconv.Itoa(n), "--output-fields=MESSAGE,PRIORITY,_SYSTEMD_UNIT,SYSLOG_IDENTIFIER,__REALTIME_TIMESTAMP,_HOSTNAME"}
 	if u := q.Get("unit"); u != "" {
-		if !unitRe.MatchString(u) {
+		// glob patterns allowed ("kopia*" → all kopia units)
+		if !logUnitRe.MatchString(u) {
 			writeErr(w, 400, "invalid unit")
 			return
 		}
@@ -350,7 +352,7 @@ func handleStorage(w http.ResponseWriter, r *http.Request) {
 	lsblk := run(r.Context(), 15*time.Second, nil, "lsblk", "-J", "-b", "-o", "NAME,PATH,SIZE,TYPE,FSTYPE,MOUNTPOINTS,MODEL,SERIAL,ROTA,TRAN,LABEL,UUID")
 	var blk any
 	_ = json.Unmarshal([]byte(lsblk.Stdout), &blk)
-	writeJSON(w, 200, map[string]any{"mounts": mounts(), "blockdevices": blk})
+	writeJSON(w, 200, map[string]any{"mounts": mounts(), "blockdevices": blk, "diskStates": metrics.diskStates()})
 }
 
 var devRe = regexp.MustCompile(`^/dev/(sd[a-z]+|nvme[0-9]+n[0-9]+|nvme[0-9]+|hd[a-z]+|vd[a-z]+)$`)
@@ -361,7 +363,16 @@ func handleSmart(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "invalid device")
 		return
 	}
-	res := run(r.Context(), 30*time.Second, nil, "smartctl", "-a", "-j", dev)
+	args := []string{"-a", "-j", dev}
+	if r.URL.Query().Get("wake") != "1" {
+		// do not spin up a sleeping disk unless asked to
+		args = append([]string{"-n", "standby"}, args...)
+	}
+	res := run(r.Context(), 30*time.Second, nil, "smartctl", args...)
+	if res.ExitCode == 2 && strings.Contains(strings.ToUpper(res.Stdout), "STANDBY") {
+		writeJSON(w, 200, map[string]any{"standby": true})
+		return
+	}
 	// smartctl uses bit-coded exit codes; JSON is valid as long as bits 0/1 are not set
 	var j any
 	if err := json.Unmarshal([]byte(res.Stdout), &j); err != nil {
@@ -480,6 +491,13 @@ func handleKill(w http.ResponseWriter, r *http.Request) {
 // ======================= Updates (apt) =======================
 
 func (s *Server) handleUpdatesList(w http.ResponseWriter, r *http.Request) {
+	refreshErr := ""
+	if r.URL.Query().Get("refresh") == "1" {
+		// refresh the package lists first (reload button in the app)
+		if up := run(r.Context(), 5*time.Minute, nil, "apt-get", "update", "-q"); up.ExitCode != 0 {
+			refreshErr = strings.TrimSpace(up.Stderr)
+		}
+	}
 	res := run(r.Context(), 60*time.Second, nil, "apt", "list", "--upgradable")
 	type pkg struct {
 		Name, NewVersion, OldVersion, Origin string
@@ -493,7 +511,7 @@ func (s *Server) handleUpdatesList(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	_, reboot := os.Stat("/var/run/reboot-required")
-	writeJSON(w, 200, map[string]any{"packages": out, "rebootRequired": reboot == nil})
+	writeJSON(w, 200, map[string]any{"packages": out, "rebootRequired": reboot == nil, "refreshError": refreshErr})
 }
 
 func (s *Server) handleUpdatesRefresh(w http.ResponseWriter, r *http.Request) {

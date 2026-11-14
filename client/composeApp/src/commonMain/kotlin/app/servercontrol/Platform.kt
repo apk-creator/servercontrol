@@ -61,6 +61,15 @@ expect fun SecretField(value: String, onValue: (String) -> Unit, label: String)
 /** Lets the user pick a file; returns its content or null. */
 expect suspend fun pickFile(): ByteArray?
 
+/** Picks a file: (file name, content) or null when cancelled. */
+expect suspend fun pickNamedFile(): Pair<String, ByteArray>?
+
+/**
+ * Asks where to save [name] and streams the content through [write] into it.
+ * Returns where it went (for a message) or null when cancelled.
+ */
+expect suspend fun saveFile(name: String, write: suspend (sink: (ByteArray, Int) -> Unit) -> Unit): String?
+
 /**
  * Keeps an SSH session alive while the app is in the background.
  * Android: foreground service with a "Verbunden" notification; desktop: nothing to do.

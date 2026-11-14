@@ -35,6 +35,10 @@ class MainActivity : ComponentActivity() {
             requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 2)
         }
         FilePicker.context = applicationContext
+        FilePicker.saver = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+            FilePicker.pendingSave?.complete(uri)
+            FilePicker.pendingSave = null
+        }
         FilePicker.launcher = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetContent()) { uri ->
             FilePicker.pending?.complete(uri)
             FilePicker.pending = null

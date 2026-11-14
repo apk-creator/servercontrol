@@ -205,6 +205,28 @@ actual suspend fun pickFile(): ByteArray? {
     return withContext(Dispatchers.IO) { path.readBytes() }
 }
 
+actual suspend fun pickNamedFile(): Pair<String, ByteArray>? {
+    val f = withContext(Dispatchers.Main) {
+        val d = java.awt.FileDialog(null as java.awt.Frame?, "Datei hochladen", java.awt.FileDialog.LOAD)
+        d.isVisible = true
+        if (d.file == null) null else File(d.directory, d.file)
+    } ?: return null
+    return withContext(Dispatchers.IO) { f.name to f.readBytes() }
+}
+
+actual suspend fun saveFile(name: String, write: suspend (sink: (ByteArray, Int) -> Unit) -> Unit): String? {
+    val f = withContext(Dispatchers.Main) {
+        val d = java.awt.FileDialog(null as java.awt.Frame?, "Speichern unter", java.awt.FileDialog.SAVE)
+        d.file = name
+        d.isVisible = true
+        if (d.file == null) null else File(d.directory, d.file)
+    } ?: return null
+    withContext(Dispatchers.IO) {
+        f.outputStream().buffered(256 * 1024).use { out -> write { b, n -> out.write(b, 0, n) } }
+    }
+    return f.absolutePath
+}
+
 /** Desktop: the session stays connected as long as the window is open. */
 actual fun terminalKeepAlive(active: Boolean, title: String) {}
 

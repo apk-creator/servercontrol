@@ -1,6 +1,10 @@
 package app.servercontrol.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.size
@@ -224,6 +228,50 @@ fun ListHeader(text: String, actions: @Composable androidx.compose.foundation.la
     }
 }
 
+/** Compact search field (40 dp) with a search symbol and a clear button – the same everywhere. */
+@Composable
+fun SearchField(value: String, onValueChange: (String) -> Unit, placeholder: String = "Suchen", modifier: Modifier = Modifier) {
+    val cs = MaterialTheme.colorScheme
+    androidx.compose.foundation.text.BasicTextField(
+        value = value,
+        onValueChange = onValueChange,
+        singleLine = true,
+        textStyle = MaterialTheme.typography.bodyMedium.copy(color = cs.onSurface),
+        cursorBrush = androidx.compose.ui.graphics.SolidColor(cs.onSurface),
+        modifier = modifier.height(40.dp),
+        decorationBox = { inner ->
+            Row(
+                Modifier.fillMaxSize()
+                    .border(1.dp, cs.outline, androidx.compose.foundation.shape.RoundedCornerShape(20.dp))
+                    .padding(start = 12.dp, end = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Default.Search, null, Modifier.size(18.dp), tint = cs.onSurfaceVariant)
+                Spacer(Modifier.width(8.dp))
+                Box(Modifier.weight(1f)) {
+                    if (value.isEmpty()) Text(placeholder, color = cs.onSurfaceVariant, maxLines = 1)
+                    inner()
+                }
+                if (value.isNotEmpty()) {
+                    IconButton(onClick = { onValueChange("") }, modifier = Modifier.size(32.dp)) { Icon(Icons.Default.Close, "Leeren", Modifier.size(16.dp)) }
+                }
+            }
+        },
+    )
+}
+
+/** Filter like the buttons (outlined); selected = filled. */
+@Composable
+fun FilterPill(selected: Boolean, onClick: () -> Unit, text: String) {
+    val pad = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+    val mod = Modifier.heightIn(min = 32.dp)
+    if (selected) {
+        Button(onClick = onClick, contentPadding = pad, modifier = mod) { Text(text, fontSize = TextSmall, maxLines = 1) }
+    } else {
+        OutlinedButton(onClick = onClick, contentPadding = pad, modifier = mod) { Text(text, fontSize = TextSmall, maxLines = 1) }
+    }
+}
+
 /** Background of row [i] in lists and tables: rows alternate (A B A B) for easier reading. */
 @Composable
 fun stripe(i: Int): Color = if (i % 2 == 1) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f) else Color.Transparent
@@ -335,6 +383,17 @@ class ActionHost(private val scope: CoroutineScope, private val api: () -> ApiCl
                 ActionResult.Message(title, e.message ?: e.toString(), false)
             }
             running = false
+            val r = result
+            if (r is ActionResult.JobRef) {
+                // refresh the view only when the job has finished (e.g. "Update verfügbar" disappears)
+                var fails = 0
+                while (fails < 5) {
+                    kotlinx.coroutines.delay(2_000)
+                    val done = runCatching { api().get<JobInfo>("/api/jobs/${r.id}").finished != null }
+                    if (done.getOrNull() == true) break
+                    if (done.isFailure) fails++ else fails = 0
+                }
+            }
             after()
         }
     }
