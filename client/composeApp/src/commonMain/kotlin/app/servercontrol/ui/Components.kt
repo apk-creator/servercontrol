@@ -1,6 +1,9 @@
 package app.servercontrol.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.height
+import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
