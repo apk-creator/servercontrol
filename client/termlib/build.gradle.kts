@@ -33,7 +33,9 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     buildFeatures { compose = true }
-    sourceSets["main"].jniLibs.srcDir(jniOut)
+    sourceSets {
+        getByName("main").jniLibs.directories.add(jniOut.get().asFile.absolutePath)
+    }
     lint { abortOnError = false }
 }
 
