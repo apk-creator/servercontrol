@@ -145,13 +145,15 @@ private fun NcMaintenanceWindow(api: ApiClient, host: ActionHost) {
     fun toUtc(local: Int) = (local - offsetH).mod(24)
     fun hh(h: Int) = h.toString().padStart(2, '0') + ":00"
     Loader(host.result == null, { api.getJson("$NC/maintenance-window") }) { w, reload ->
-        val set = w["set"].bool == true
-        val utc = w["startUtc"].long?.toInt() ?: 1
+        val raw = w["startUtc"].long?.toInt()
+        val anytime = w["set"].bool == true && raw != null && raw > 23
+        val set = w["set"].bool == true && !anytime
+        val utc = raw?.takeIf { it in 0..23 } ?: 1
         var local by remember(w) { mutableStateOf(if (set) toLocal(utc).toString() else "") }
         SectionCard("Wartungsfenster", actions = { RefreshButton(reload) }) {
             KeyValues(
-                "Beginn" to if (set) "${hh(toLocal(utc))} Ortszeit (${hh(utc)} UTC)" else "nicht festgelegt",
-                "Dauer" to "4 Stunden",
+                "Beginn" to when { anytime -> "jederzeit (kein Fenster)"; set -> "${hh(toLocal(utc))} Ortszeit (${hh(utc)} UTC)"; else -> "nicht festgelegt" },
+                "Dauer" to if (anytime) "–" else "4 Stunden (von Nextcloud fest vorgegeben)",
             )
             Text("In diesem Zeitraum erledigt Nextcloud aufwendige Hintergrundjobs (z. B. Aufräumen, Vorschaubilder). " +
                 "Nextcloud speichert die Zeit in UTC; mit der Sommerzeit verschiebt sich die Ortszeit um eine Stunde.", fontSize = TextSmall)
@@ -164,9 +166,14 @@ private fun NcMaintenanceWindow(api: ApiClient, host: ActionHost) {
                     host.run("Wartungsfenster", { api.putRaw("$NC/maintenance-window", """{"startUtc":$u}"""); "Beginn ${hh(h ?: 0)} Ortszeit (${hh(u)} UTC)." }, reload)
                 }) { Text("Setzen") }
             }
-            if (set) SmallButton("Entfernen", {
-                host.run("Wartungsfenster entfernt", { api.putRaw("$NC/maintenance-window", """{"startUtc":-1}"""); "Kein Wartungsfenster mehr festgelegt." }, reload)
-            })
+            ButtonRow {
+                if (!anytime) SmallButton("Jederzeit erlauben", {
+                    host.run("Wartungsfenster", { api.putRaw("$NC/maintenance-window", """{"startUtc":100}"""); "Aufwendige Hintergrundjobs dürfen jetzt jederzeit laufen." }, reload)
+                })
+                if (set || anytime) SmallButton("Entfernen", {
+                    host.run("Wartungsfenster entfernt", { api.putRaw("$NC/maintenance-window", """{"startUtc":-1}"""); "Kein Wartungsfenster mehr festgelegt." }, reload)
+                })
+            }
         }
     }
 }
@@ -179,7 +186,7 @@ private fun NcUsers(api: ApiClient, host: ActionHost, ask: (Confirm) -> Unit) {
     Loader(host.result == null, { api.getJson("$NC/users") }) { users, reload ->
         Column {
             Row(Modifier.padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                OutlinedTextField(filter, { filter = it }, Modifier.weight(1f), label = { Text("Suchen") }, singleLine = true)
+                SearchField(filter, { filter = it }, modifier = Modifier.weight(1f))
                 AddButton({ adding = true }, "Benutzer anlegen")
                 RefreshButton(reload)
             }
@@ -276,7 +283,7 @@ private fun NcApps(api: ApiClient, host: ActionHost, ask: (Confirm) -> Unit) {
     Loader(host.result == null, { api.getJson("$NC/apps") }) { apps, reload ->
         Column {
             Row(Modifier.padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                OutlinedTextField(filter, { filter = it }, Modifier.weight(1f), label = { Text("Suchen") }, singleLine = true)
+                SearchField(filter, { filter = it }, modifier = Modifier.weight(1f))
                 RefreshButton(reload)
             }
             Row(Modifier.padding(horizontal = 12.dp)) {

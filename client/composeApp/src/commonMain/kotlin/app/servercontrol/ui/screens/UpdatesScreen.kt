@@ -34,7 +34,8 @@ import kotlinx.coroutines.launch
 /** App, agent, Nextcloud, Immich and system packages on one page, with one refresh for everything. */
 @Composable
 fun UpdatesScreen(state: AppState, api: ApiClient) {
-    val host = rememberActionHost { api }
+    // app-wide scope: the view refreshes after an update even if it was left meanwhile
+    val host = remember { ActionHost(state.appScope) { api } }
     var confirm by remember { mutableStateOf<Confirm?>(null) }
     val r = state.updateReport
     val modules = state.session?.modules.orEmpty()
@@ -44,11 +45,11 @@ fun UpdatesScreen(state: AppState, api: ApiClient) {
         item {
             ListHeader(
                 when {
-                    state.updatesChecking -> "Prüfe auf Updates …"
+                    state.updatesChecking -> "Prüfe auf Updates (inkl. Paketlisten des Servers) …"
                     r != null -> "Zuletzt geprüft um ${formatClock(r.checkedAt)}" + if (r.summary.isEmpty()) " · alles aktuell" else ""
                     else -> ""
                 },
-            ) { RefreshButton(recheck) }
+            ) { RefreshButton { state.checkUpdates(refreshLists = true) } }
             if (state.updatesChecking) LinearProgressIndicator(Modifier.fillMaxWidth())
         }
         if (r == null) return@LazyColumn
@@ -63,7 +64,7 @@ fun UpdatesScreen(state: AppState, api: ApiClient) {
         if (modules["immich"] == true) item { ImmichUpdateCard(r, host, recheck) { confirm = it } }
         val sys = r.system
         item {
-            SectionCard("Systempakete") {
+            SectionCard("Server") {
                 if (sys == null) {
                     Text("Nicht verfügbar.", fontSize = TextSmall)
                     return@SectionCard
@@ -71,7 +72,6 @@ fun UpdatesScreen(state: AppState, api: ApiClient) {
                 Text(if (sys.packages.isEmpty()) "System ist aktuell." else "${sys.packages.size} Updates verfügbar (${r.securityCount} Sicherheit)", fontWeight = Bold)
                 if (sys.rebootRequired) Text("Neustart erforderlich.", color = StatusWarn)
                 ButtonRow {
-                    SmallButton("Paketlisten aktualisieren", { host.post("apt update", "/api/system/updates/refresh", after = recheck) })
                     if (sys.packages.isNotEmpty()) {
                         SmallButton("Installieren", { confirm = Confirm("Updates installieren?", "apt-get upgrade für ${sys.packages.size} Pakete.") { host.post("Upgrade", "/api/system/updates/upgrade", after = recheck) } })
                         SmallButton("Full-Upgrade", { confirm = Confirm("Full-Upgrade ausführen?", "apt-get full-upgrade kann auch Pakete entfernen oder neu installieren.") { host.post("Full-Upgrade", "/api/system/updates/upgrade?mode=full", after = recheck) } })
@@ -79,7 +79,7 @@ fun UpdatesScreen(state: AppState, api: ApiClient) {
                 }
             }
         }
-        if (sys != null && app.servercontrol.ui.CardState.collapsed["Systempakete"] != true) {
+        if (sys != null && app.servercontrol.ui.CardState.collapsed["Server"] != true) {
             itemsIndexed(sys.packages) { i, p ->
                 StripedItem(
                     i,

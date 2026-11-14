@@ -165,9 +165,9 @@ private fun KopiaConnectDialog(api: ApiClient, onDone: () -> Unit) {
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    FilterChip(!create, { create = false }, label = { Text("Vorhandenes") })
+                    FilterPill(!create, { create = false }, "Vorhandenes")
                     Spacer(Modifier.width(8.dp))
-                    FilterChip(create, { create = true }, label = { Text("Neu anlegen") })
+                    FilterPill(create, { create = true }, "Neu anlegen")
                 }
                 Text(
                     if (create) "Legt ein neues, verschlüsseltes Repository im angegebenen Verzeichnis an (z. B. auf einer HDD)."

@@ -81,15 +81,15 @@ fun SshKeysScreen(state: AppState, session: Session) {
                     "der private Teil bleibt verschlüsselt in der App, nur der öffentliche kommt auf den Server.", fontSize = TextSmall)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     SshKeyAlgo.entries.forEach { a ->
-                        FilterChip(algo == a, {
+                        FilterPill(algo == a, {
                             algo = a
                             bits = when (a) { SshKeyAlgo.ED25519 -> 0; SshKeyAlgo.ECDSA -> 256; SshKeyAlgo.RSA -> 4096 }
-                        }, label = { Text(if (a == SshKeyAlgo.ED25519) "Ed25519 (empfohlen)" else a.label) })
+                        }, if (a == SshKeyAlgo.ED25519) "Ed25519 (empfohlen)" else a.label)
                     }
                 }
                 val sizes = when (algo) { SshKeyAlgo.ECDSA -> listOf(256, 384, 521); SshKeyAlgo.RSA -> listOf(3072, 4096); else -> emptyList() }
                 if (sizes.isNotEmpty()) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    sizes.forEach { b -> FilterChip(bits == b, { bits = b }, label = { Text("$b Bit") }) }
+                    sizes.forEach { b -> FilterPill(bits == b, { bits = b }, "$b Bit") }
                 }
                 OutlinedTextField(comment, { comment = it.replace(" ", "-") }, Modifier.fillMaxWidth(), label = { Text("Kommentar (erscheint auf dem Server)") }, singleLine = true)
                 Button(enabled = !generating, onClick = {

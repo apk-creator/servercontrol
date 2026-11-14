@@ -231,6 +231,8 @@ actual fun SecretField(value: String, onValue: (String) -> Unit, label: String) 
 /** Bridge to the activity's file picker (registered in MainActivity). */
 object FilePicker {
     var launcher: androidx.activity.result.ActivityResultLauncher<String>? = null
+    var saver: androidx.activity.result.ActivityResultLauncher<String>? = null
+    var pendingSave: kotlinx.coroutines.CompletableDeferred<android.net.Uri?>? = null
     var pending: kotlinx.coroutines.CompletableDeferred<android.net.Uri?>? = null
     lateinit var context: Context
 }
@@ -244,6 +246,36 @@ actual suspend fun pickFile(): ByteArray? {
     return withContext(Dispatchers.IO) {
         FilePicker.context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
     }
+}
+
+actual suspend fun pickNamedFile(): Pair<String, ByteArray>? {
+    val l = FilePicker.launcher ?: return null
+    val d = kotlinx.coroutines.CompletableDeferred<android.net.Uri?>()
+    FilePicker.pending = d
+    l.launch("*/*")
+    val uri = d.await() ?: return null
+    return withContext(Dispatchers.IO) {
+        val cr = FilePicker.context.contentResolver
+        val name = cr.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+            if (c.moveToFirst()) c.getString(0) else null
+        } ?: uri.lastPathSegment?.substringAfterLast('/') ?: "upload"
+        val bytes = cr.openInputStream(uri)?.use { it.readBytes() } ?: return@withContext null
+        name to bytes
+    }
+}
+
+actual suspend fun saveFile(name: String, write: suspend (sink: (ByteArray, Int) -> Unit) -> Unit): String? {
+    val l = FilePicker.saver ?: return null
+    val d = kotlinx.coroutines.CompletableDeferred<android.net.Uri?>()
+    FilePicker.pendingSave = d
+    l.launch(name)
+    val uri = d.await() ?: return null
+    withContext(Dispatchers.IO) {
+        FilePicker.context.contentResolver.openOutputStream(uri, "w")?.use { out ->
+            write { b, n -> out.write(b, 0, n) }
+        } ?: throw IllegalStateException("Datei kann nicht geschrieben werden")
+    }
+    return name
 }
 
 actual val ioDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.IO

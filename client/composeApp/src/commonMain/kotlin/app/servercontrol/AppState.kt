@@ -31,7 +31,7 @@ sealed interface Screen {
 
 enum class Section(val title: String, val module: String? = null) {
     OVERVIEW("Übersicht"), TERMINAL("Terminal"), SSH_KEYS("SSH-Schlüssel"), SERVICES("Dienste"), CONTAINERS("Container"), LOGS("Protokolle"),
-    STORAGE("Speicher"), NETWORK("Netzwerk"), PROCESSES("Prozesse"), UPDATES("Updates"),
+    STORAGE("Speicher"), FILES("Dateien"), NETWORK("Netzwerk"), PROCESSES("Prozesse"), UPDATES("Updates"),
     ACCOUNTS("Konten"), KOPIA("Kopia"), NEXTCLOUD("Nextcloud"), IMMICH("Immich"),
     JOBS("Aufgaben"), SHELL("Befehl", "shell"), AGENT("Agent"),
 }
@@ -59,6 +59,9 @@ class AppState(
     private val store: SecureStore,
     private val scope: CoroutineScope,
 ) {
+    /** for actions that must finish even when the user leaves the view (e.g. updates) */
+    val appScope: CoroutineScope get() = scope
+
     var vault by mutableStateOf(ProfileVault())
         private set
     var screen by mutableStateOf<Screen>(Screen.Profiles)
@@ -302,13 +305,13 @@ class AppState(
     /** set by the "Updates verfügbar" notification */
     var openUpdatesWhenReady by mutableStateOf(false)
 
-    fun checkUpdates() {
+    fun checkUpdates(refreshLists: Boolean = false) {
         val s = session ?: return
         if (updatesChecking) return
         updatesChecking = true
         scope.launch {
             try {
-                updateReport = checkAllUpdates(s.api, s.modules, app.servercontrol.ui.screens.currentTimeMs())
+                updateReport = checkAllUpdates(s.api, s.modules, app.servercontrol.ui.screens.currentTimeMs(), refreshLists)
             } catch (e: Throwable) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
             } finally {

@@ -172,6 +172,7 @@ data class UpgradablePackage(
 data class UpdatesInfo(
     val packages: List<UpgradablePackage> = emptyList(),
     val rebootRequired: Boolean = false,
+    val refreshError: String = "",
 )
 
 @Serializable

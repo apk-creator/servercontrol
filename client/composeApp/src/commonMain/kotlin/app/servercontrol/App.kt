@@ -261,6 +261,7 @@ fun Section.icon(): ImageVector = when (this) {
     Section.CONTAINERS -> Icons.Default.ViewInAr
     Section.LOGS -> Icons.AutoMirrored.Filled.List
     Section.STORAGE -> Icons.Default.Storage
+    Section.FILES -> Icons.Default.Folder
     Section.NETWORK -> Icons.Default.Lan
     Section.PROCESSES -> Icons.Default.Memory
     Section.UPDATES -> Icons.Default.SystemUpdate
@@ -379,6 +380,7 @@ fun SectionContent(state: AppState, session: Session) {
         Section.CONTAINERS -> ContainersScreen(api)
         Section.LOGS -> LogsScreen(api)
         Section.STORAGE -> StorageScreen(api)
+        Section.FILES -> FilesScreen(api)
         Section.NETWORK -> NetworkScreen(api)
         Section.PROCESSES -> ProcessesScreen(api)
         Section.UPDATES -> UpdatesScreen(state, api)

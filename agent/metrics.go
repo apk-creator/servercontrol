@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"net/http"
 	"os"
 	"regexp"
@@ -60,6 +61,7 @@ type Metrics struct {
 	history  []Point
 	hddTemps []DiskTemp
 	hddAt    time.Time
+	disks    map[string]DiskState
 }
 
 var metrics = &Metrics{}
@@ -218,49 +220,97 @@ func rotatingDisks() []string {
 	return out
 }
 
-var smartTempRe = regexp.MustCompile(`(?m)^\s*(194|190)\s+\S+\s+\S+\s+\S+\s+\S+\s+\S+\s+\S+\s+\S+\s+\S+\s+(\d+)`)
-var smartModelRe = regexp.MustCompile(`(?m)^(Device Model|Model Number|Product):\s*(.+)$`)
+// DiskState: power state and SMART health of a disk, read without waking sleeping disks.
+type DiskState struct {
+	Standby bool    `json:"standby"`
+	Passed  *bool   `json:"smartPassed"` // nil = unknown
+	C       float64 `json:"celsius"`
+	At      int64   `json:"checkedAt"` // epoch ms
+}
 
-func (m *Metrics) readHddTemps() {
-	var out []DiskTemp
+func physicalDisks() []string {
+	ents, _ := os.ReadDir("/sys/block")
+	var out []string
+	for _, e := range ents {
+		if physDiskRe.MatchString(e.Name()) {
+			out = append(out, e.Name())
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// readDiskStates asks every disk with "smartctl -n standby": a sleeping disk is not touched;
+// for it the last known health and temperature are kept.
+func (m *Metrics) readDiskStates() {
+	states := map[string]DiskState{}
+	m.mu.Lock()
+	prev := m.disks
+	m.mu.Unlock()
+	rot := map[string]bool{}
 	for _, d := range rotatingDisks() {
-		model := ""
-		if b, err := os.ReadFile("/sys/block/" + d + "/device/model"); err == nil {
-			model = strings.TrimSpace(string(b))
+		rot[d] = true
+	}
+	var temps []DiskTemp
+	for _, d := range physicalDisks() {
+		res := run(context.Background(), 30*time.Second, nil, "smartctl", "-n", "standby", "-H", "-A", "-j", "/dev/"+d)
+		var j struct {
+			Smartctl struct {
+				Messages []struct {
+					String string `json:"string"`
+				} `json:"messages"`
+			} `json:"smartctl"`
+			ModelName   string `json:"model_name"`
+			SmartStatus *struct {
+				Passed bool `json:"passed"`
+			} `json:"smart_status"`
+			Temperature struct {
+				Current float64 `json:"current"`
+			} `json:"temperature"`
 		}
-		// -n standby: smartctl exits with code 2 without touching a sleeping disk
-		res := run(context.Background(), 30*time.Second, nil, "smartctl", "-n", "standby", "-A", "/dev/"+d)
-		dt := DiskTemp{Device: "/dev/" + d, Model: model}
-		if up := strings.ToUpper(res.Stdout); res.ExitCode == 2 && (strings.Contains(up, "STANDBY") || strings.Contains(up, "SLEEP")) {
-			dt.Standby = true
-		} else if mm := smartTempRe.FindStringSubmatch(res.Stdout); mm != nil {
-			dt.C, _ = strconv.ParseFloat(mm[2], 64)
+		_ = json.Unmarshal([]byte(res.Stdout), &j)
+		st := DiskState{At: time.Now().UnixMilli()}
+		msgs := ""
+		for _, msg := range j.Smartctl.Messages {
+			msgs += strings.ToUpper(msg.String) + " "
+		}
+		if strings.Contains(msgs, "STANDBY") || strings.Contains(msgs, "SLEEP") {
+			p := prev["/dev/"+d]
+			st = DiskState{Standby: true, Passed: p.Passed, C: p.C, At: p.At}
 		} else {
-			continue
-		}
-		if dt.Model == "" {
-			if mm := smartModelRe.FindStringSubmatch(res.Stdout); mm != nil {
-				dt.Model = strings.TrimSpace(mm[2])
+			if j.SmartStatus != nil {
+				v := j.SmartStatus.Passed
+				st.Passed = &v
 			}
+			st.C = j.Temperature.Current
 		}
-		out = append(out, dt)
+		states["/dev/"+d] = st
+		if rot[d] && (st.C > 0 || st.Standby) {
+			model := ""
+			if b, err := os.ReadFile("/sys/block/" + d + "/device/model"); err == nil {
+				model = strings.TrimSpace(string(b))
+			}
+			if model == "" {
+				model = j.ModelName
+			}
+			temps = append(temps, DiskTemp{Device: "/dev/" + d, Model: model, C: st.C, Standby: st.Standby})
+		}
 	}
 	m.mu.Lock()
-	// keep the last known temperature of a disk that went to sleep
-	prev := map[string]float64{}
-	for _, t := range m.hddTemps {
-		if t.C > 0 {
-			prev[t.Device] = t.C
-		}
-	}
-	for i := range out {
-		if out[i].Standby {
-			out[i].C = prev[out[i].Device]
-		}
-	}
-	m.hddTemps = out
+	m.disks = states
+	m.hddTemps = temps
 	m.hddAt = time.Now()
 	m.mu.Unlock()
+}
+
+func (m *Metrics) diskStates() map[string]DiskState {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := map[string]DiskState{}
+	for k, v := range m.disks {
+		out[k] = v
+	}
+	return out
 }
 
 func (m *Metrics) Start() {
@@ -273,7 +323,7 @@ func (m *Metrics) Start() {
 	}()
 	go func() {
 		for {
-			m.readHddTemps()
+			m.readDiskStates()
 			time.Sleep(hddTempEvery)
 		}
 	}()

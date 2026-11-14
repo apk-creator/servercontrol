@@ -48,11 +48,11 @@ data class UpdateReport(
             ncServer?.let { "Nextcloud $it" },
             ncApps.takeIf { it > 0 }?.let { "$it Nextcloud-App${if (it > 1) "s" else ""}" },
             immichLatest?.let { "Immich $it" },
-            systemCount.takeIf { it > 0 }?.let { "$it Systempaket${if (it > 1) "e" else ""}" + if (securityCount > 0) " ($securityCount Sicherheit)" else "" },
+            systemCount.takeIf { it > 0 }?.let { "Server: $it Paket${if (it > 1) "e" else ""}" + if (securityCount > 0) " ($securityCount Sicherheit)" else "" },
         )
 }
 
-suspend fun checkAllUpdates(api: ApiClient, modules: Map<String, Boolean>, now: Long): UpdateReport = coroutineScope {
+suspend fun checkAllUpdates(api: ApiClient, modules: Map<String, Boolean>, now: Long, refreshLists: Boolean = false): UpdateReport = coroutineScope {
     suspend fun <T> safe(name: String, b: suspend () -> T): Pair<T?, String?> = try {
         b() to null
     } catch (e: kotlinx.coroutines.CancellationException) {
@@ -65,13 +65,13 @@ suspend fun checkAllUpdates(api: ApiClient, modules: Map<String, Boolean>, now: 
     val imAbout = async { if (modules["immich"] == true) safe("Immich") { api.getJson("/api/immich/server/about") } else null to null }
     val imCheck = async { if (modules["immich"] == true) safe("Immich") { api.getJson("/api/immich/server/version-check") } else null to null }
     val imCompose = async { if (modules["immich"] == true) safe("Immich") { api.getJson("/api/immich-compose") } else null to null }
-    val sys = async { safe("System") { api.get<UpdatesInfo>("/api/system/updates", 120_000) } }
+    val sys = async { safe("System") { api.get<UpdatesInfo>("/api/system/updates" + if (refreshLists) "?refresh=1" else "", 420_000) } }
     val all = listOf(agent, nc, imAbout, imCheck, imCompose).map { it.await() }
     val s = sys.await()
     UpdateReport(
         agent = all[0].first, nextcloud = all[1].first, immichAbout = all[2].first, immichCheck = all[3].first, immichCompose = all[4].first,
         system = s.first, checkedAt = now,
-        errors = (all.mapNotNull { it.second } + listOfNotNull(s.second)).distinct(),
+        errors = (all.mapNotNull { it.second } + listOfNotNull(s.second, s.first?.refreshError?.takeIf { it.isNotBlank() }?.let { "Paketlisten: $it" })).distinct(),
     )
 }
 
