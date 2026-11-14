@@ -272,6 +272,8 @@ private fun KopiaRepoDetail(api: ApiClient, repo: KopiaRepo, onBack: () -> Unit)
     var editMaint by remember { mutableStateOf<JsonElement?>(null) }
     val base = "/api/kopia/repos/${repo.id}"
     var maintAsk by remember { mutableStateOf(false) }
+    var freshReq by remember { mutableStateOf(0) }
+    var freshDone by remember { mutableStateOf(0) }
     BackHandler { onBack() }
     Column(Modifier.fillMaxSize()) {
         Text(repo.name, Modifier.padding(start = 16.dp, top = 8.dp), fontWeight = Bold)
@@ -296,9 +298,12 @@ private fun KopiaRepoDetail(api: ApiClient, repo: KopiaRepo, onBack: () -> Unit)
             Spacer(Modifier.weight(1f))
             RefreshButton { tick++ }
         }
-        Loader(repo.id to tick, {
+        Loader(Triple(repo.id, tick, freshReq), {
+            // maintenance info is cached on the agent; "fresh" reads it again (wakes the disk)
+            val fresh = freshReq != freshDone
+            freshDone = freshReq
             Triple(
-                api.getJson("$base/status"),
+                api.getJson("$base/status" + if (fresh) "?fresh=1" else "", 120_000),
                 api.get<List<KopiaSnapshot>>("$base/snapshots", timeoutMs = 180_000),
                 Unit,
             )
@@ -319,6 +324,7 @@ private fun KopiaRepoDetail(api: ApiClient, repo: KopiaRepo, onBack: () -> Unit)
                             "Name" to (d["model"].str.ifBlank { "–" } + (d["rotational"].bool?.let { if (it) " (HDD)" else " (SSD)" } ?: "")),
                             "Ausnutzung" to if (total > 0) "${100 * (d["used"].long ?: 0) / total} % · ${formatBytes(d["used"].long)} von ${formatBytes(total)}" else "–",
                             "Konfiguration" to repo.configFile,
+                            "Abfrage" to if (status["via"].str == "server") "über den Kopia-Server (Platte bleibt im Standby)" else "Kommandozeile (weckt die Platte)",
                         )
                     }
                 }
@@ -377,9 +383,14 @@ private fun KopiaRepoDetail(api: ApiClient, repo: KopiaRepo, onBack: () -> Unit)
                             val last = v.arr.firstOrNull()
                             if (last != null) rows += "Zuletzt $k" to localTime(last["end"].str) + if (last["success"].bool == false) " ✗" else " ✓"
                         }
+                        status["maintenanceAt"].long?.takeIf { it > 0 }?.let { rows += "Stand" to formatTime(it).dropLast(3) }
                         rows.forEachIndexed { i, (k, v) -> KeyValue(k, v, i) }
-                        Text("Laufen die Wartungen über eigene Skripte (z. B. nach dem Snapshot), hier „aus“ lassen.", fontSize = TextSmall)
-                        ButtonRow { SmallButton("Wartung einstellen", { editMaint = m ?: kotlinx.serialization.json.JsonObject(emptyMap()) }) }
+                        Text("Laufen die Wartungen über eigene Skripte (z. B. nach dem Snapshot), hier „aus“ lassen. " +
+                            "Die Wartungsinfo wird zwischengespeichert, weil das Lesen die Platte weckt.", fontSize = TextSmall)
+                        ButtonRow {
+                            SmallButton("Wartung einstellen", { editMaint = m ?: kotlinx.serialization.json.JsonObject(emptyMap()) })
+                            SmallButton("Neu lesen", { freshReq++ })
+                        }
                     }
                 }
                 item { Spacer(Modifier.heightIn(min = 24.dp)) }
@@ -463,6 +474,7 @@ private fun ScheduleBlock(api: ApiClient, base: String, source: String, tick: In
         cron.takeIf { it.isNotBlank() }?.let { "Crontab" to it },
         if (sch["manual"].bool == true) "Modus" to "nur manuell" else null,
         "Retention" to retention.ifBlank { "–" },
+        p["upcomingSnapshotTimes"].arr.take(2).map { localTime(it.str) }.takeIf { it.isNotEmpty() }?.let { "Nächste" to it.joinToString(", ") },
     )
     rows.forEachIndexed { i, (a, b) -> KeyValue(a, b, i) }
     ButtonRow { SmallButton("Zeitplan einstellen", { onEdit(p) }) }

@@ -16,3 +16,5 @@ dependencyResolutionManagement {
 }
 
 include(":composeApp")
+// ConnectBot terminal with a small patch (see termlib/README.md)
+include(":termlib")
