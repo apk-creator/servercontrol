@@ -49,6 +49,7 @@ func (s *Server) handleKopiaRepos(w http.ResponseWriter, r *http.Request) {
 		Connected bool   `json:"connected"`
 		Storage   any    `json:"storage,omitempty"`
 		Error     string `json:"error,omitempty"`
+		Via       string `json:"via"`
 	}
 	out := make([]item, len(c.Kopia.Repos))
 	done := make(chan struct{})
@@ -56,7 +57,19 @@ func (s *Server) handleKopiaRepos(w http.ResponseWriter, r *http.Request) {
 		go func(i int, k KopiaRepo) {
 			defer func() { done <- struct{}{} }()
 			it := item{KopiaRepo: k}
+			// ask the running Kopia server first – a CLI call would wake the backup disk
+			if srv := kopiaServerFor(r.Context(), k); srv != nil {
+				var st map[string]any
+				if err := srv.call(r.Context(), "GET", "/api/v1/repo/status", nil, &st); err == nil {
+					it.Connected = st["connected"] == true
+					it.Storage = storageFromConfig(k)
+					it.Via = "server"
+					out[i] = it
+					return
+				}
+			}
 			res := run(r.Context(), 30*time.Second, kopiaEnv(c.Kopia.Repos[i]), c.Kopia.Binary, kopiaArgs(k, "repository", "status", "--json")...)
+			it.Via = "cli"
 			if res.ExitCode == 0 {
 				var st map[string]any
 				if json.Unmarshal([]byte(res.Stdout), &st) == nil {
@@ -151,12 +164,35 @@ func (s *Server) handleKopiaStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	env := kopiaEnv(k)
-	st := run(r.Context(), 30*time.Second, env, bin, kopiaArgs(k, "repository", "status", "--json")...)
-	mi := run(r.Context(), 30*time.Second, env, bin, kopiaArgs(k, "maintenance", "info", "--json")...)
-	var status, maint any
-	_ = json.Unmarshal([]byte(st.Stdout), &status)
-	_ = json.Unmarshal([]byte(mi.Stdout), &maint)
-	resp := map[string]any{"status": status, "maintenance": maint}
+	fresh := r.URL.Query().Get("fresh") == "1"
+	var status any
+	var errMsg, via string
+	if srv := kopiaServerFor(r.Context(), k); srv != nil {
+		var st map[string]any
+		if err := srv.call(r.Context(), "GET", "/api/v1/repo/status", nil, &st); err == nil {
+			st["storage"] = storageFromConfig(k)
+			status, via = st, "server"
+		} else {
+			errMsg = err.Error()
+		}
+	}
+	if status == nil {
+		st := run(r.Context(), 30*time.Second, env, bin, kopiaArgs(k, "repository", "status", "--json")...)
+		_ = json.Unmarshal([]byte(st.Stdout), &status)
+		via = "cli"
+		if st.ExitCode != 0 {
+			errMsg = strings.TrimSpace(st.Stderr)
+		} else {
+			errMsg = ""
+		}
+	}
+	// maintenance info exists only in the CLI: cached for 12 h (reading it wakes the disk)
+	maint, maintAt := cachedCLI(k.ID+"|maint", fresh, func() (any, bool) {
+		mi := run(r.Context(), 30*time.Second, env, bin, kopiaArgs(k, "maintenance", "info", "--json")...)
+		var m any
+		return m, json.Unmarshal([]byte(mi.Stdout), &m) == nil && mi.ExitCode == 0
+	})
+	resp := map[string]any{"status": status, "maintenance": maint, "maintenanceAt": maintAt.UnixMilli(), "via": via}
 	if m, ok := status.(map[string]any); ok {
 		if stg, ok := m["storage"].(map[string]any); ok {
 			if c, ok := stg["config"].(map[string]any); ok {
@@ -166,8 +202,8 @@ func (s *Server) handleKopiaStatus(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	if st.ExitCode != 0 {
-		resp["error"] = strings.TrimSpace(st.Stderr)
+	if errMsg != "" && via == "cli" {
+		resp["error"] = errMsg
 	}
 	writeJSON(w, 200, resp)
 }
@@ -177,6 +213,12 @@ func (s *Server) handleKopiaSnapshots(w http.ResponseWriter, r *http.Request) {
 	k, bin, ok := s.kopiaRepo(w, r)
 	if !ok {
 		return
+	}
+	if srv := kopiaServerFor(r.Context(), k); srv != nil {
+		if snaps, err := srv.serverSnapshots(r.Context()); err == nil {
+			writeJSON(w, 200, snaps)
+			return
+		}
 	}
 	res := run(r.Context(), 90*time.Second, kopiaEnv(k), bin, kopiaArgs(k, "snapshot", "list", "--all", "--json")...)
 	if res.ExitCode != 0 {
@@ -253,6 +295,14 @@ func (s *Server) handleKopiaAction(w http.ResponseWriter, r *http.Request) {
 	title := "Kopia " + k.Name + ": "
 	var args []string
 	timeout := 12 * time.Hour
+	dropCLICache(k.ID)
+	// snapshot and delete through the running Kopia server: it sees the change at once
+	if srv := kopiaServerFor(r.Context(), k); srv != nil {
+		if msg, done := kopiaServerAction(r, srv, k, r.PathValue("action"), req.Source, req.SnapshotID); done {
+			writeJSON(w, 200, map[string]any{"ok": true, "stdout": msg})
+			return
+		}
+	}
 	switch r.PathValue("action") {
 	case "snapshot":
 		switch {
@@ -357,10 +407,28 @@ func (s *Server) handleKopiaSchedule(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "invalid source")
 		return
 	}
-	res := run(r.Context(), 30*time.Second, kopiaEnv(k), bin, kopiaArgs(k, "policy", "show", "--json", src)...)
-	var p any
-	if json.Unmarshal([]byte(res.Stdout), &p) != nil {
-		sendResult(w, res)
+	// effective policy from the running server (with the next snapshot times)
+	if srv := kopiaServerFor(r.Context(), k); srv != nil {
+		user, rest, _ := strings.Cut(src, "@")
+		host, path, _ := strings.Cut(rest, ":")
+		var res struct {
+			Effective map[string]any `json:"effective"`
+			Upcoming  []string       `json:"upcomingSnapshotTimes"`
+		}
+		q := srcQuery(kopiaSource{UserName: user, Host: host, Path: path})
+		if err := srv.call(r.Context(), "POST", "/api/v1/policy/resolve?"+q, map[string]any{"updates": map[string]any{}, "numUpcomingSnapshotTimes": 3}, &res); err == nil && res.Effective != nil {
+			res.Effective["upcomingSnapshotTimes"] = res.Upcoming
+			writeJSON(w, 200, res.Effective)
+			return
+		}
+	}
+	p, _ := cachedCLI(k.ID+"|policy|"+src, r.URL.Query().Get("fresh") == "1", func() (any, bool) {
+		res := run(r.Context(), 30*time.Second, kopiaEnv(k), bin, kopiaArgs(k, "policy", "show", "--json", src)...)
+		var p any
+		return p, json.Unmarshal([]byte(res.Stdout), &p) == nil
+	})
+	if p == nil {
+		writeErr(w, 502, "Richtlinie nicht lesbar")
 		return
 	}
 	writeJSON(w, 200, p)
@@ -432,6 +500,7 @@ func (s *Server) handleKopiaScheduleSet(w http.ResponseWriter, r *http.Request) 
 		args = append(args, "--keep-"+key+"="+v)
 	}
 	logf("kopia %s: policy set %v", k.ID, args[3:])
+	dropCLICache(k.ID)
 	sendResult(w, run(r.Context(), 60*time.Second, kopiaEnv(k), bin, kopiaArgs(k, args...)...))
 }
 
@@ -460,5 +529,66 @@ func (s *Server) handleKopiaMaintSet(w http.ResponseWriter, r *http.Request) {
 		args = append(args, "--full-interval="+strconv.Itoa(req.FullHours)+"h")
 	}
 	logf("kopia %s: %v", k.ID, args)
+	dropCLICache(k.ID)
 	sendResult(w, run(r.Context(), 60*time.Second, kopiaEnv(k), bin, kopiaArgs(k, args...)...))
+}
+
+// kopiaServerAction runs snapshot/delete via the server API; done=false → fall back to the CLI.
+func kopiaServerAction(r *http.Request, srv *kopiaSrv, k KopiaRepo, action, source, snapID string) (string, bool) {
+	ctx := r.Context()
+	switch action {
+	case "snapshot":
+		var src struct {
+			Sources []struct {
+				Source kopiaSource `json:"source"`
+			} `json:"sources"`
+		}
+		if srv.call(ctx, "GET", "/api/v1/sources", nil, &src) != nil {
+			return "", false
+		}
+		want := map[string]bool{}
+		switch {
+		case source != "":
+			want[source] = true
+		case len(k.Sources) > 0:
+			for _, p := range k.Sources {
+				want[p] = true
+			}
+		}
+		var started []string
+		for _, so := range src.Sources {
+			if len(want) > 0 && !want[so.Source.Path] {
+				continue
+			}
+			var res any
+			if err := srv.call(ctx, "POST", "/api/v1/sources/upload?"+srcQuery(so.Source), map[string]any{}, &res); err != nil {
+				return "", false
+			}
+			started = append(started, so.Source.Path)
+			delete(want, so.Source.Path)
+		}
+		if len(started) == 0 || len(want) > 0 {
+			return "", false // a source the server does not manage → CLI
+		}
+		logf("kopia %s: snapshot via server: %v", k.ID, started)
+		return "Snapshot gestartet (läuft im Kopia-Server " + srv.Unit + "): " + strings.Join(started, ", "), true
+	case "delete-snapshot":
+		snaps, err := srv.serverSnapshots(ctx)
+		if err != nil {
+			return "", false
+		}
+		for _, m := range snaps {
+			if m["id"] == snapID {
+				so, _ := m["source"].(kopiaSource)
+				var res any
+				body := map[string]any{"source": so, "snapshotManifestIds": []string{snapID}, "deleteSourceAndPolicy": false}
+				if err := srv.call(ctx, "POST", "/api/v1/snapshots/delete", body, &res); err != nil {
+					return "", false
+				}
+				logf("kopia %s: snapshot %s deleted via server", k.ID, snapID)
+				return "Snapshot gelöscht. Der Speicher wird bei der nächsten vollständigen Wartung freigegeben.", true
+			}
+		}
+	}
+	return "", false
 }

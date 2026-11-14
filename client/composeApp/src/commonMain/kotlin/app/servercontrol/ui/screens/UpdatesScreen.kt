@@ -69,7 +69,8 @@ fun UpdatesScreen(state: AppState, api: ApiClient) {
                     Text("Nicht verfügbar.", fontSize = TextSmall)
                     return@SectionCard
                 }
-                Text(if (sys.packages.isEmpty()) "System ist aktuell." else "${sys.packages.size} Updates verfügbar (${r.securityCount} Sicherheit)", fontWeight = Bold)
+                if (sys.packages.isEmpty()) Text("System ist aktuell.", color = StatusOk)
+                else Text("${sys.packages.size} Updates verfügbar (${r.securityCount} Sicherheit)", fontWeight = Bold, color = StatusWarn)
                 if (sys.rebootRequired) Text("Neustart erforderlich.", color = StatusWarn)
                 ButtonRow {
                     if (sys.packages.isNotEmpty()) {
@@ -111,11 +112,11 @@ private fun AppUpdateCard(state: AppState, r: UpdateReport) {
                 Text("${formatBytes(progress.done)}${if (progress.total > 0) " von ${formatBytes(progress.total)}" else ""}", fontSize = TextSmall)
                 SmallButton("Abbrechen", { state.cancelAppUpdate() })
             }
-            progress != null -> {
-                Text(if (progress.ok) progress.message ?: "Fertig." else "Update fehlgeschlagen: ${progress.message}",
-                    color = if (progress.ok) StatusOk else StatusBad, fontSize = TextSmall)
-                SmallButton("OK", { state.dismissAppUpdate() })
+            progress != null && !progress.ok -> {
+                Text("Update fehlgeschlagen: ${progress.message}", color = StatusBad, fontSize = TextSmall)
+                if (r.appLatest != null) Button(onClick = { r.appAsset?.let { state.startAppUpdate(it) } }) { Text("Erneut versuchen") }
             }
+            progress != null -> Text(progress.message ?: "Fertig.", color = StatusOk, fontSize = TextSmall)
             r.appLatest != null -> Button(onClick = { r.appAsset?.let { state.startAppUpdate(it) } }) { Text("App auf ${r.appLatest} aktualisieren") }
             latest.isNotBlank() && compareVersions(latest, APP_VERSION) > 0 -> Text("Im Release ist kein Paket für diese Plattform.", color = StatusWarn, fontSize = TextSmall)
             latest.isNotBlank() -> Text("Die App ist aktuell.", color = StatusOk)
@@ -138,9 +139,9 @@ private fun AgentUpdateCard(state: AppState, api: ApiClient, r: UpdateReport, ho
                 Text(busy, fontSize = TextSmall)
                 LinearProgressIndicator(Modifier.fillMaxWidth())
             }
-            res != null -> {
-                Text(res.second, color = if (res.first) StatusOk else StatusBad, fontSize = TextSmall)
-                SmallButton("OK", { state.agentUpdateResult = null })
+            res != null && !res.first && r.agentLatest != null -> {
+                Text(res.second, color = StatusBad, fontSize = TextSmall)
+                Button(onClick = { state.startAgentUpdate() }) { Text("Erneut versuchen") }
             }
             r.agentLatest != null -> {
                 c["notes"].str.takeIf { it.isNotBlank() }?.let { Text(it.take(1500), fontSize = TextSmall) }
@@ -153,20 +154,6 @@ private fun AgentUpdateCard(state: AppState, api: ApiClient, r: UpdateReport, ho
             }
             c["newer"].bool == true -> Text("Das Release enthält keine Agent-Datei.", color = StatusWarn, fontSize = TextSmall)
             err.isBlank() && c != null -> Text("Der Agent ist aktuell.", color = StatusOk)
-        }
-        if (busy == null) ButtonRow {
-            SmallButton("Aus Datei installieren …", {
-                scope.launch {
-                    val data = pickFile() ?: return@launch
-                    ask(Confirm("Agent aus Datei installieren?",
-                        "${formatBytes(data.size.toLong())} – erwartet wird servercontrol-agent.tar.gz aus einem Release oder die Linux-Binärdatei. Der Agent startet danach neu.") {
-                        host.run("Agent-Update", {
-                            val j = AppJson.parseToJsonElement(api.postBytes("/api/agent/update/upload", data))
-                            "Version ${j["oldVersion"].str} → ${j["newVersion"].str}\n${j["message"].str}"
-                        }, after = { state.checkUpdates() })
-                    })
-                }
-            })
         }
     }
 }
