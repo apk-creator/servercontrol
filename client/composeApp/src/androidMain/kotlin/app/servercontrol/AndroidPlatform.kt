@@ -368,3 +368,6 @@ internal suspend fun fastDownload(
 }
 
 actual val deviceName: String = "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}".trim()
+
+actual fun bundledAgentPackage(): ByteArray? =
+    runCatching { AppContext.app.assets.open("agent/servercontrol-agent.tar.gz").use { it.readBytes() } }.getOrNull()

@@ -172,6 +172,7 @@ func (s *Server) routes() http.Handler {
 	priv.HandleFunc("GET /api/kopia/repos/{repo}/status", s.handleKopiaStatus)
 	priv.HandleFunc("GET /api/kopia/repos/{repo}/snapshots", s.handleKopiaSnapshots)
 	priv.HandleFunc("GET /api/kopia/repos/{repo}/policies", s.handleKopiaPolicies)
+	priv.HandleFunc("/api/kopia/repos/{repo}/srv/{path...}", s.handleKopiaProxy)
 	priv.HandleFunc("GET /api/kopia/repos/{repo}/schedule", s.handleKopiaSchedule)
 	priv.HandleFunc("POST /api/kopia/repos/{repo}/schedule", s.handleKopiaScheduleSet)
 	priv.HandleFunc("POST /api/kopia/repos/{repo}/maintenance-schedule", s.handleKopiaMaintSet)

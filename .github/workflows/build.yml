@@ -59,9 +59,15 @@ jobs:
           path: servercontrol-agent.tar.gz
 
   android:
+    needs: [meta, agent]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # the app carries the agent of the same version (installs it over SSH when missing)
+      - uses: actions/download-artifact@v4
+        with:
+          name: servercontrol-agent
+          path: client/composeApp/src/androidMain/assets/agent
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -100,9 +106,14 @@ jobs:
             task: packageReleaseMsi
             glob: client/composeApp/build/compose/binaries/main-release/msi/*.msi
             name: ServerControl-windows-msi
+    needs: [meta, agent]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: servercontrol-agent
+          path: client/composeApp/src/desktopMain/resources/agent
       - uses: actions/setup-java@v4
         with:
           distribution: temurin

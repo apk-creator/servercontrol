@@ -12,3 +12,7 @@ agent.json
 *.pw
 immich.key
 tls.key
+
+# agent package bundled by CI
+client/composeApp/src/androidMain/assets/agent/
+client/composeApp/src/desktopMain/resources/agent/

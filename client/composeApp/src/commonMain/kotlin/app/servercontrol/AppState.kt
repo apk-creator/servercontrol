@@ -185,6 +185,7 @@ class AppState(
         sectionHistory.clear()
         screen = Screen.Main
         checkUpdates()
+        checkAgentVersion(api)
     }
 
     private val renewLock = Mutex()
@@ -237,6 +238,7 @@ class AppState(
         } catch (e: Throwable) {
             error = e.message ?: e.toString()
             conn.close()
+            if (e is app.servercontrol.net.ConnectException && (e.message ?: "").contains("nicht erreichbar")) detectMissingAgent(profile)
         } finally {
             busy = null
         }
@@ -244,6 +246,7 @@ class AppState(
 
     fun login(profile: ServerProfile, user: String, password: String) = scope.launch {
         error = null
+        agentMissing = null
         try {
             val (api, connected) = connect(profile)
             var prof = connected
@@ -265,9 +268,119 @@ class AppState(
         } catch (e: Throwable) {
             error = e.message ?: e.toString()
             conn.close()
+            if (e is app.servercontrol.net.ConnectException && (e.message ?: "").contains("nicht erreichbar")) detectMissingAgent(profile)
         } finally {
             busy = null
         }
+    }
+
+    // ---------------- agent missing → install over SSH ----------------
+
+    /** the server answers on SSH but not on the agent port: offer to install the agent */
+    var agentMissing by mutableStateOf<ServerProfile?>(null)
+    var installLog by mutableStateOf<String?>(null)
+        private set
+    var installing by mutableStateOf(false)
+        private set
+    /** SSH host key seen during installation, waiting for confirmation */
+    var installHostKey by mutableStateOf<Pair<String, String>?>(null)
+
+    fun hostOf(p: ServerProfile): Pair<String, Int> {
+        val m = Regex("""^\w+://(\[[^\]]+\]|[^/:]+)(?::(\d+))?""").find(p.lanUrl.trim())
+        val h = m?.groupValues?.get(1)?.trim('[', ']') ?: p.lanUrl
+        val port = m?.groupValues?.get(2)?.toIntOrNull() ?: 8443
+        return h to port
+    }
+
+    private suspend fun detectMissingAgent(p: ServerProfile) {
+        val (h, port) = hostOf(p)
+        busy = "Prüfe, ob ein Agent installiert ist …"
+        if (!tcpReachable(h, port, 2500) && tcpReachable(h, p.sshPort, 2500)) {
+            agentMissing = p
+            error = "Auf $h antwortet kein ServerControl-Agent (Port $port), der Server ist aber per SSH erreichbar."
+        }
+    }
+
+    /**
+     * Installs the agent bundled with this app over SSH (sudo), pins its certificate
+     * (the fingerprint comes over the authenticated SSH connection) and signs in.
+     */
+    fun installAgent(
+        profile: ServerProfile, sshUser: String, sshPassword: String, sudoPassword: String,
+        agentPassword: String, addKey: Boolean, trustedHostKey: String? = null,
+    ) = scope.launch {
+        installing = true
+        installHostKey = null
+        error = null
+        val log = StringBuilder()
+        fun say(t: String) { log.appendLine(t); installLog = log.toString().trim() }
+        try {
+            val pkg = bundledAgentPackage() ?: throw Exception("Diese App-Version enthält kein Agent-Paket.")
+            val (host, _) = hostOf(profile)
+            val known = trustedHostKey ?: profile.sshHostKey
+            say("Verbinde per SSH mit $sshUser@$host …")
+            val auth = SshAuth(sshUser, sshPassword.ifBlank { null }, profile.sshPrivateKey.ifBlank { null }, null)
+            val files = mutableMapOf("servercontrol-agent.tar.gz" to pkg, "pw" to agentPassword.encodeToByteArray())
+            if (addKey && profile.sshPublicKey.isNotBlank()) files["pubkey"] = (profile.sshPublicKey.trim() + "\n").encodeToByteArray()
+            say("Lade Agent ${APP_VERSION} hoch und installiere ihn …")
+            val script = "set -e\ncd \"\$(dirname \"\$0\")\"\ntar -xzf servercontrol-agent.tar.gz\nexec sh ./install-remote.sh\n"
+            val (code, out) = try {
+                sshSudoScript(host, profile.sshPort, auth, known, sudoPassword.ifBlank { sshPassword }.ifBlank { null }, files, script)
+            } catch (e: SshHostKeyUnknown) {
+                installHostKey = e.fingerprint to e.keyType
+                say("Unbekannter SSH-Hostschlüssel – bitte bestätigen.")
+                return@launch
+            }
+            val kv = out.lines().mapNotNull { l -> l.substringBefore('=', "").takeIf { it.isNotEmpty() && it.all { c -> c.isUpperCase() } }?.let { it to l.substringAfter('=') } }.toMap()
+            if (code != 0 || kv["FP"].isNullOrBlank()) {
+                val msg = kv["ERROR"] ?: out.lines().filter { it.isNotBlank() }.takeLast(6).joinToString("\n").ifBlank { "Exit $code" }
+                throw Exception(if (msg.contains("incorrect password") || msg.contains("Sorry, try again")) "sudo-Passwort falsch." else msg)
+            }
+            say("Agent ${kv["VER"]} läuft" + if (kv["ACTIVE"] == "0") " nicht – siehe Systemprotokoll." else ".")
+            if (kv["KEY"] == "added") say("App-Schlüssel für das Terminal eingetragen.")
+            val updated = (vault.profiles.find { it.id == profile.id } ?: profile).copy(
+                certFingerprint = kv["FP"]!!.trim(), sshUser = sshUser, sshHostKey = known.ifBlank { profile.sshHostKey },
+            )
+            upsert(updated)
+            agentMissing = null
+            if (kv["FIREWALL"] == "closed") {
+                say("Die Firewall lässt Port 8443 noch nicht durch. Im LAN freigeben, z. B.:\nsudo nft add rule inet <tabelle> input ip saddr 192.168.1.0/24 tcp dport 8443 accept")
+            }
+            if (kv["EXISTING"] == "1") {
+                say("Der Agent war schon eingerichtet – bitte mit dem bisherigen Agent-Passwort anmelden.")
+                screen = Screen.Login(updated)
+            } else {
+                say("Melde an …")
+                kotlinx.coroutines.delay(2_000)
+                screen = Screen.Login(updated)
+                login(updated, kv["AGENTUSER"].orEmpty().ifBlank { "admin" }, agentPassword)
+            }
+        } catch (e: Throwable) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            say("Fehler: " + (e.message ?: e.toString()))
+        } finally {
+            installing = false
+        }
+    }
+
+    /** remembers the confirmed SSH host key and continues the installation */
+    fun confirmInstallHostKey(profile: ServerProfile, fp: String) {
+        val updated = (vault.profiles.find { it.id == profile.id } ?: profile).copy(sshHostKey = fp)
+        scope.launch { upsert(updated) }
+        if (agentMissing?.id == profile.id) agentMissing = updated
+        installHostKey = null
+    }
+
+    fun clearInstallLog() { installLog = null }
+
+    // ---------------- agent version check after sign-in ----------------
+
+    /** agent older than the app: offer the update right after sign-in */
+    var agentOutdated by mutableStateOf<String?>(null)
+
+    private fun checkAgentVersion(api: ApiClient) = scope.launch {
+        val v = runCatching { api.getJson("/api/config")["version"].str }.getOrDefault("")
+        agentOutdated = v.takeIf { it.isNotBlank() && it != "dev" && app.servercontrol.ui.screens.compareVersions(it, APP_VERSION) < 0 }
     }
 
     private suspend fun expire() {
