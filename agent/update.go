@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -35,10 +37,11 @@ type ghRelease struct {
 	Body        string `json:"body"`
 	PublishedAt string `json:"published_at"`
 	Assets      []struct {
-		ID   int64  `json:"id"`
-		Name string `json:"name"`
-		URL  string `json:"url"`
-		Size int64  `json:"size"`
+		ID     int64  `json:"id"`
+		Name   string `json:"name"`
+		URL    string `json:"url"`
+		Size   int64  `json:"size"`
+		Digest string `json:"digest"` // "sha256:<hex>", set by GitHub for release assets
 	} `json:"assets"`
 }
 
@@ -186,10 +189,10 @@ func (s *Server) downloadAndInstall(ctx context.Context) (map[string]any, error)
 	if err != nil {
 		return nil, err
 	}
-	var assetURL string
+	var assetURL, digest string
 	for _, a := range rel.Assets {
 		if a.Name == agentAsset {
-			assetURL = a.URL
+			assetURL, digest = a.URL, a.Digest
 		}
 	}
 	if assetURL == "" {
@@ -207,17 +210,23 @@ func (s *Server) downloadAndInstall(ctx context.Context) (map[string]any, error)
 	if err != nil {
 		return nil, err
 	}
+	if err := verifyDigest(data, digest); err != nil {
+		return nil, err
+	}
 	return installBinary(ctx, data)
 }
 
-// POST /api/agent/update/upload – body is the release tarball or the bare binary
-func (s *Server) handleUpdateUpload(w http.ResponseWriter, r *http.Request) {
-	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 100<<20))
-	if err != nil {
-		writeErr(w, 400, "Upload fehlgeschlagen: "+err.Error())
-		return
+// verifyDigest checks the download against the SHA-256 that GitHub publishes for the asset.
+func verifyDigest(data []byte, digest string) error {
+	want, ok := strings.CutPrefix(digest, "sha256:")
+	if !ok || len(want) != 64 {
+		return fmt.Errorf("Release ohne SHA-256-Prüfsumme – Update abgebrochen")
 	}
-	s.install(w, r, data)
+	sum := sha256.Sum256(data)
+	if hex.EncodeToString(sum[:]) != strings.ToLower(want) {
+		return fmt.Errorf("Prüfsumme des Downloads stimmt nicht – Update abgebrochen")
+	}
+	return nil
 }
 
 func extractBinary(data []byte) ([]byte, error) {
@@ -246,20 +255,6 @@ func extractBinary(data []byte) ([]byte, error) {
 	default:
 		return nil, errors.New("unbekanntes Format (erwartet .tar.gz aus dem Release oder Linux-Binärdatei)")
 	}
-}
-
-func (s *Server) install(w http.ResponseWriter, r *http.Request, data []byte) {
-	res, err := installBinary(r.Context(), data)
-	if err != nil {
-		code := 500
-		var ce codeErr
-		if errors.As(err, &ce) {
-			code = ce.code
-		}
-		writeErr(w, code, err.Error())
-		return
-	}
-	writeJSON(w, 200, res)
 }
 
 type codeErr struct {

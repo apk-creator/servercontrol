@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PowerSettingsNew
+import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.ui.graphics.Color
 import kotlin.math.roundToInt
@@ -45,6 +46,8 @@ import app.servercontrol.ui.*
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.put
+import androidx.compose.foundation.layout.Box
 
 private fun enc(s: String) = s.replace("%", "%25").replace("+", "%2B").replace(" ", "%20").replace("&", "%26").replace("?", "%3F").replace("#", "%23").replace("/", "%2F")
 
@@ -437,6 +440,7 @@ expect fun currentUtcOffsetMs(): Long
 @Composable
 fun StorageScreen(api: ApiClient) {
     var smartDev by remember { mutableStateOf<String?>(null) }
+    val host = rememberActionHost { api }
     Loader(Unit, { api.getJson("/api/system/storage") }) { data, reload ->
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
             SectionCard("Dateisysteme", actions = { RefreshButton(reload) }) {
@@ -471,9 +475,96 @@ fun StorageScreen(api: ApiClient) {
                 }
                 Text("Tippe auf ein Laufwerk für SMART-Werte. Platten im Standby werden nicht geweckt; für sie gilt der letzte bekannte SMART-Status.", style = MaterialTheme.typography.bodySmall)
             }
+            StandbyCard(api, host)
         }
     }
     smartDev?.let { SmartDialog(api, it) { smartDev = null } }
+    ActionResultDialog(host, api)
+}
+
+private val standbyTimes = listOf(0 to "nie", 300 to "5 min", 600 to "10 min", 900 to "15 min", 1200 to "20 min", 1800 to "30 min", 3600 to "1 h", 7200 to "2 h")
+
+private fun standbyLabel(s: Int) = standbyTimes.firstOrNull { it.first == s }?.second ?: if (s % 60 == 0) "${s / 60} min" else "$s s"
+
+/** Speicher → Auto-Standby: spin-down times of the HDDs with hdparm or hd-idle */
+@Composable
+private fun StandbyCard(api: ApiClient, host: ActionHost) {
+    var tick by remember { mutableStateOf(0) }
+    SectionCard("Auto-Standby", actions = { RefreshButton { tick++ } }) {
+        Loader(tick, { api.getJson("/api/storage/standby") }) { d, _ ->
+            var method by remember(d) { mutableStateOf(d["method"].str) }
+            val times = remember(d) {
+                androidx.compose.runtime.mutableStateMapOf<String, Int>().apply {
+                    d["disks"].arr.forEach { e -> e["id"].str.takeIf { it.isNotBlank() }?.let { put(it, e["timeout"].long?.toInt() ?: 0) } }
+                }
+            }
+            val disable = remember(d) { androidx.compose.runtime.mutableStateListOf<String>() }
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Nach welcher Leerlaufzeit die HDDs schlafen gehen. Zu kurze Zeiten verschleißen Motor und Mechanik; 10–30 Minuten sind ein guter Wert.", fontSize = TextSmall)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    FilterPill(method == "hdparm", { method = "hdparm" }, "hdparm")
+                    FilterPill(method == "hdidle", { method = "hdidle" }, "hd-idle")
+                    FilterPill(method == "", { method = "" }, "aus")
+                }
+                Text(
+                    when (method) {
+                        "hdparm" -> "hdparm stellt den Timer in der Platte ein (beim Start des Servers neu gesetzt)."
+                        "hdidle" -> "hd-idle überwacht die Zugriffe und schickt die Platten selbst schlafen; der Timer der Platten wird dafür abgeschaltet."
+                        else -> "Keine Verwaltung durch die App; die Timer der Platten werden abgeschaltet."
+                    },
+                    fontSize = TextSmall,
+                )
+                if (method == "hdidle" && d["hdidle"].bool != true) {
+                    Text("hd-idle ist nicht installiert.", color = StatusWarn, fontSize = TextSmall)
+                    SmallButton("hd-idle installieren", { host.post("hd-idle installieren", "/api/storage/standby/install-hdidle", after = { tick++ }) })
+                }
+                if (method == "hdparm" && d["hdparm"].bool != true) Text("hdparm ist nicht installiert.", color = StatusWarn, fontSize = TextSmall)
+                val disks = d["disks"].arr
+                if (disks.isEmpty()) Text("Keine HDDs gefunden.", fontSize = TextSmall)
+                disks.forEachIndexed { i, e ->
+                    val id = e["id"].str
+                    val state = e["state"].str
+                    var open by remember { mutableStateOf(false) }
+                    Row(Modifier.fillMaxWidth().background(stripe(i)).padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f).padding(vertical = 4.dp)) {
+                            Text("${e["device"].str.removePrefix("/dev/")} · ${e["model"].str} · ${formatBytes(e["size"].long)}", maxLines = 1)
+                            Text(
+                                when (state) { "active" -> "aktiv"; "standby", "sleeping" -> "Standby"; else -> "Zustand unbekannt" },
+                                fontSize = TextSmall,
+                                color = if (state == "active") StatusOk else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            if (id.isBlank()) Text("ohne /dev/disk/by-id – nicht verwaltbar", fontSize = TextSmall, color = StatusWarn)
+                        }
+                        if (id.isNotBlank()) Box {
+                            OutlinedButton(onClick = { open = true }, enabled = method.isNotBlank()) { Text(if (method.isBlank()) "–" else standbyLabel(times[id] ?: 0), maxLines = 1) }
+                            DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                                standbyTimes.forEach { (v, l) -> DropdownMenuItem(text = { Text(l) }, onClick = { open = false; times[id] = v }) }
+                            }
+                        }
+                        IconButton(onClick = { host.post("Schlafen legen", "/api/storage/standby/sleep", """{"device":${jsonString(e["device"].str)}}""", after = { tick++ }) }, enabled = state == "active") {
+                            Icon(Icons.Default.Bedtime, "Jetzt schlafen legen", Modifier.size(20.dp))
+                        }
+                    }
+                }
+                d["foreignUnits"].arr.filter { it["enabled"].bool == true }.forEach { u ->
+                    val name = u["unit"].str
+                    Text("Eigener Dienst „$name“ setzt ebenfalls Standby-Zeiten und würde die Einstellung hier beim nächsten Start überschreiben.", color = StatusWarn, fontSize = TextSmall)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(name in disable, { if (it) disable.add(name) else disable.remove(name) })
+                        Text("$name beim Speichern deaktivieren", fontSize = TextSmall)
+                    }
+                }
+                Button(onClick = {
+                    val body = kotlinx.serialization.json.buildJsonObject {
+                        put("method", method)
+                        put("disks", kotlinx.serialization.json.buildJsonObject { times.forEach { (k, v) -> put(k, v) } })
+                        put("disableUnits", kotlinx.serialization.json.buildJsonArray { disable.forEach { add(kotlinx.serialization.json.JsonPrimitive(it)) } })
+                    }.toString()
+                    host.run("Auto-Standby", { AppJson.parseToJsonElement(api.putRaw("/api/storage/standby", body))["stdout"].str }, after = { tick++ })
+                }, enabled = method != "hdidle" || d["hdidle"].bool == true) { Text("Speichern") }
+            }
+        }
+    }
 }
 
 @Composable
