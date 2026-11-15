@@ -2,8 +2,9 @@
 
 Verwaltung **eines** Debian-13-Servers vom Android-Gerät und vom Desktop (Linux/Windows):
 
-- Cockpit-Funktionen: Übersicht (CPU, RAM, Temperaturen, Last), Dienste (systemd), Container (Docker/Podman), Protokolle (journald), Speicher + SMART + Auto-Standby der HDDs (hdparm oder hd-idle), Dateien, Netzwerk, Prozesse, Updates (apt), Konten, Neustart/Herunterfahren, optional Root-Befehle
-- **Kopia** – beliebig viele Repositories (je eine Kopia-Konfigurationsdatei): Status, Snapshots je Quelle, Snapshot jetzt, Wartung, Verifizieren, Wiederherstellen, Löschen
+- Cockpit-Funktionen: Übersicht (CPU, RAM, Temperaturen, Laufwerke, Verlauf bis 24 h), **System** mit den Reitern Dienste (systemd), Prozesse, Container (Docker/Podman), Speicher (Laufwerke mit SMART, Partitionieren, Formatieren, Einhängen, Auto-Standby über hd-idle), Netzwerk und Protokolle (journald), Dateien, Updates (apt), Konten, Neustart/Herunterfahren, optional Root-Befehle
+- Reiter und Karten lassen sich durch langes Drücken umordnen; das „?“ oben rechts beschreibt jede Seite
+- **Kopia** – beliebig viele Repositories als Reiter: Snapshots, Richtlinien, Aufgaben, Wartung mit Zeitplan, Benachrichtigungen (über den laufenden Kopia-Server, damit die Platten schlafen können)
 - **Nextcloud** – Status, Wartungsmodus, Einrichtungsprüfung, Benutzer (anlegen, sperren, Kontingent, Passwort), Apps, DB-Reparaturen, Dateiscan, Hintergrundjob-Modus
 - **Immich** – Version/Speicher/Statistik, Aufträge (starten, pausieren, leeren), Benutzer, externe Bibliotheken
 - **SSH-Terminal** (xterm-kompatibel: bash, nano, htop, less, vim, mc), Hostschlüssel gepinnt, Anmeldung per Schlüssel
@@ -19,7 +20,9 @@ Verwaltung **eines** Debian-13-Servers vom Android-Gerät und vom Desktop (Linux
 
 ## 1. Agent auf dem Server installieren
 
-Artefakt `servercontrol-agent` aus dem letzten GitHub-Actions-Lauf (oder Release) laden, auf den Server kopieren:
+Am einfachsten installiert die App den Agent selbst: Beim ersten Verbinden ohne Agent bietet sie die Installation per SSH an und lädt das passende Paket aus dem GitHub-Release.
+
+Von Hand: `servercontrol-agent.tar.gz` aus dem neuesten Release laden und auf den Server kopieren:
 
 ```sh
 mkdir sc && tar -C sc -xzf servercontrol-agent.tar.gz && cd sc

@@ -39,47 +39,41 @@ import app.servercontrol.ui.*
 private const val NC = "/api/nextcloud"
 
 @Composable
-fun NextcloudMain(api: ApiClient, onSetup: () -> Unit) {
-    var tab by remember { mutableStateOf(0) }
+fun NextcloudMain(api: ApiClient, mod: JsonElement, onSetupDone: () -> Unit) {
     val host = rememberActionHost { api }
     var confirm by remember { mutableStateOf<Confirm?>(null) }
     val act = { title: String, action: String, body: String? -> host.post(title, "$NC/action/$action", body) }
-    Column(Modifier.fillMaxSize()) {
-        ScrollableTabRow(selectedTabIndex = tab, edgePadding = 8.dp) {
-            listOf("Status", "Benutzer", "Apps", "Wartung", "Einrichtung").forEachIndexed { i, t ->
-                Tab(selected = tab == i, onClick = { tab = i }, text = { Text(t) })
-            }
-        }
+    TabbedScreen("tabs.nextcloud", listOf("Status", "Benutzer", "Apps", "Wartung", "Einrichtung")) { tab ->
         when (tab) {
-            0 -> NcStatus(api, host) { confirm = it }
-            1 -> NcUsers(api, host) { confirm = it }
-            2 -> NcApps(api, host) { confirm = it }
-            4 -> LaunchedEffect(Unit) { tab = 0; onSetup() }
-            3 -> Column(Modifier.verticalScroll(rememberScrollState())) {
-                NcMaintenanceWindow(api, host)
-                SectionCard("Datenbank") {
+            "Status" -> NcStatus(api, host) { confirm = it }
+            "Benutzer" -> NcUsers(api, host) { confirm = it }
+            "Apps" -> NcApps(api, host) { confirm = it }
+            "Einrichtung" -> NextcloudSetup(api, mod, onSetupDone)
+            "Wartung" -> CardColumn("cards.nc.wartung") {
+                card("Wartungsfenster") { NcMaintenanceWindow(api, host) }
+                card("Datenbank") { SectionCard("Datenbank") {
                     ButtonRow {
                         SmallButton("Fehlende Indizes", { act("Fehlende Indizes", "add-missing-indices", null) })
                         SmallButton("Fehlende Spalten", { act("Fehlende Spalten", "add-missing-columns", null) })
                         SmallButton("Fehlende Primärschlüssel", { act("Primärschlüssel", "add-missing-primary-keys", null) })
                     }
-                }
-                SectionCard("Reparatur & Upgrade") {
+                } }
+                card("Reparatur & Upgrade") { SectionCard("Reparatur & Upgrade") {
                     ButtonRow {
                         SmallButton("Reparatur", { act("Reparatur", "repair", null) })
                         SmallButton("Reparatur (umfangreich)", { confirm = Confirm("Umfangreiche Reparatur?", "maintenance:repair --include-expensive kann lange dauern.") { act("Reparatur", "repair-expensive", null) } })
                         SmallButton("occ upgrade", { confirm = Confirm("occ upgrade ausführen?", "Nur nach einem Update von Nextcloud nötig.") { act("Upgrade", "upgrade", null) } })
                     }
-                }
-                SectionCard("Dateien") {
+                } }
+                card("Dateien") { SectionCard("Dateien") {
                     ButtonRow {
                         SmallButton("Alle Dateien scannen", { confirm = Confirm("Alle Dateien scannen?", "files:scan --all kann bei vielen Dateien Stunden dauern.") { act("Dateiscan", "files-scan-all", null) } })
                         SmallButton("Dateicache aufräumen", { act("Cleanup", "files-cleanup", null) })
                         SmallButton("Versionen aufräumen", { act("Versionen", "versions-cleanup", null) })
                         SmallButton("Papierkorb aller leeren", { confirm = Confirm("Papierkorb aller Benutzer leeren?", "Gelöschte Dateien aller Benutzer werden endgültig entfernt.") { act("Papierkorb", "trashbin-cleanup", null) } })
                     }
-                }
-                SectionCard("Hintergrundjobs") {
+                } }
+                card("Hintergrundjobs") { SectionCard("Hintergrundjobs") {
                     Loader(host.result == null, { api.getJson("$NC/background") }) { b, _ ->
                         KeyValues(
                             "Modus" to b["mode"].str,
@@ -91,7 +85,7 @@ fun NextcloudMain(api: ApiClient, onSetup: () -> Unit) {
                             SmallButton(m, { act("Modus $m", "background-mode", """{"mode":"$m"}""") })
                         }
                     }
-                }
+                } }
             }
         }
     }
@@ -155,8 +149,6 @@ private fun NcMaintenanceWindow(api: ApiClient, host: ActionHost) {
                 "Beginn" to when { anytime -> "jederzeit (kein Fenster)"; set -> "${hh(toLocal(utc))} Ortszeit (${hh(utc)} UTC)"; else -> "nicht festgelegt" },
                 "Dauer" to if (anytime) "–" else "4 Stunden (von Nextcloud fest vorgegeben)",
             )
-            Text("In diesem Zeitraum erledigt Nextcloud aufwendige Hintergrundjobs (z. B. Aufräumen, Vorschaubilder). " +
-                "Nextcloud speichert die Zeit in UTC; mit der Sommerzeit verschiebt sich die Ortszeit um eine Stunde.", fontSize = TextSmall)
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(local, { local = it.filter(Char::isDigit).take(2) }, Modifier.weight(1f),
                     label = { Text("Beginn (Stunde, Ortszeit)") }, singleLine = true)
@@ -316,16 +308,12 @@ private fun NcApps(api: ApiClient, host: ActionHost, ask: (Confirm) -> Unit) {
 @Composable
 fun NextcloudScreen(api: ApiClient) {
     var refresh by remember { mutableStateOf(0) }
-    var setup by remember { mutableStateOf(false) }
     Loader(refresh, { api.getJson("/api/config") }) { cfg, _ ->
         val mod = cfg["nextcloud"]
-        if (mod["enabled"].bool != true || setup) {
-            Column(Modifier.fillMaxSize()) {
-                BackHandler(setup) { setup = false }
-                NextcloudSetup(api, mod) { setup = false; refresh++ }
-            }
+        if (mod["enabled"].bool != true) {
+            Column(Modifier.fillMaxSize()) { NextcloudSetup(api, mod) { refresh++ } }
         } else {
-            NextcloudMain(api) { setup = true }
+            NextcloudMain(api, mod) { refresh++ }
         }
     }
 }

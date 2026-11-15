@@ -1,5 +1,7 @@
 package app.servercontrol.ui.screens
 
+import app.servercontrol.ui.CardColumn
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -168,8 +170,8 @@ fun AgentScreen(state: app.servercontrol.AppState, api: ApiClient) {
     Loader(host.result == null, { api.getJson("/api/config") }) { cfg, reload ->
         var repo by remember(cfg) { mutableStateOf(cfg["update"]["repo"].str) }
         var token by remember(cfg) { mutableStateOf("") }
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-            SectionCard("Agent", actions = { RefreshButton(reload) }) {
+        CardColumn("cards.agent") {
+            card("Agent") { SectionCard("Agent", actions = { RefreshButton(reload) }) {
                 KeyValues(
                     "Agent-Version" to cfg["version"].str,
                     "App-Version" to APP_VERSION,
@@ -178,11 +180,10 @@ fun AgentScreen(state: app.servercontrol.AppState, api: ApiClient) {
                     "Kopia-Repos" to cfg["kopiaCount"].str,
                     "Root-Befehle" to if (cfg["allowShell"].bool == true) "erlaubt (allowShell)" else "aus",
                 )
-                Text("App- und Agent-Updates stehen unter „Updates“.", fontSize = TextSmall)
-            }
-            DevicesCard(api)
-            SectionCard("Update-Quelle") {
-                Text("Für ein privates Repository braucht der Server ein GitHub-Token mit Lesezugriff (Fine-grained Token: nur dieses Repository, Berechtigung „Contents: Read-only“).", fontSize = TextSmall)
+            } }
+            card("Geräte") { DevicesCard(api) }
+            card("Aufgaben") { JobsCard(api) }
+            card("Update-Quelle") { SectionCard("Update-Quelle") {
                 OutlinedTextField(repo, { repo = it.trim() }, Modifier.fillMaxWidth(), label = { Text("Repository (owner/name)") }, singleLine = true)
                 SecretField(token, { token = it }, if (cfg["update"]["hasToken"].bool == true) "GitHub-Token (leer = behalten)" else "GitHub-Token")
                 ButtonRow {
@@ -195,7 +196,7 @@ fun AgentScreen(state: app.servercontrol.AppState, api: ApiClient) {
                         host.run("Update-Quelle", { api.putRaw("/api/config/update", b); "Token gelöscht." }, reload)
                     })
                 }
-            }
+            } }
         }
     }
     ConfirmDialog(confirm) { confirm = null }
@@ -211,7 +212,6 @@ private fun DevicesCard(api: ApiClient) {
     var askRevoke by remember { mutableStateOf<Pair<String, String>?>(null) }
     LaunchedEffect(reload) { list = runCatching { api.getJson("/api/devices") }.getOrNull() }
     SectionCard("Angemeldete Geräte", actions = { RefreshButton { reload++ } }) {
-        Text("Diese Geräte bleiben angemeldet, auch wenn die App lange im Hintergrund war. „Abmelden“ im Menü entfernt das eigene Gerät.", fontSize = TextSmall)
         val items = list?.arr
         if (items == null) {
             Text("…", fontSize = TextSmall)

@@ -20,6 +20,13 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /** One line of a chart. */
+// colours like Cockpit's metrics page
+val ChartCpu = Color(0xFF2B7BD6)
+val ChartMem = Color(0xFF8A5CC2)
+val ChartIn = Color(0xFF2B7BD6)
+val ChartNetIn = Color(0xFF3E9C5C)
+val ChartOut = Color(0xFFE8833A)
+
 class ChartSeries(val values: List<Double>, val color: Color, val fill: Boolean = false)
 
 /**
@@ -64,7 +71,7 @@ fun LineChart(series: List<ChartSeries>, capacity: Int, maxY: Double? = null, he
 
 /** Title, current value(s) and the chart. */
 @Composable
-fun ChartBlock(title: String, value: String, series: List<ChartSeries>, capacity: Int, maxY: Double? = null, index: Int = -1) {
+fun ChartBlock(title: String, value: String, series: List<ChartSeries>, capacity: Int, maxY: Double? = null, index: Int = -1, scale: ((Double) -> String)? = null) {
     Column(
         Modifier.fillMaxWidth()
             .background(if (index >= 0) stripe(index) else Color.Transparent, androidx.compose.foundation.shape.RoundedCornerShape(4.dp))
@@ -75,5 +82,10 @@ fun ChartBlock(title: String, value: String, series: List<ChartSeries>, capacity
             Text(value, fontSize = TextSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         LineChart(series, capacity, maxY)
+        // scaled to the largest value of the period: show what the top line means
+        if (scale != null) {
+            val top = series.maxOfOrNull { it.values.maxOrNull() ?: 0.0 } ?: 0.0
+            Text("Spitze ${scale(top)}", fontSize = TextSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }

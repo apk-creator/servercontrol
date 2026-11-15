@@ -20,7 +20,9 @@ import (
 
 const (
 	sampleEvery   = 5 * time.Second
-	historyPoints = 720 // 1 hour
+	historyPoints = 17280 // 24 hours
+	maxChartPts   = 720   // points sent to the app (averaged buckets)
+	smartStore    = "/var/lib/servercontrol/smart.json"
 	hddTempEvery  = 2 * time.Minute
 )
 
@@ -62,6 +64,8 @@ type Metrics struct {
 	hddTemps []DiskTemp
 	hddAt    time.Time
 	disks    map[string]DiskState
+	devUtil  map[string]float64 // I/O busy % of each disk in the last interval
+	started  time.Time
 }
 
 var metrics = &Metrics{}
@@ -183,13 +187,20 @@ func (m *Metrics) step() {
 		}
 		pt.DiskRead = rate(p.diskRead, s.diskRead, secs)
 		pt.DiskWrite = rate(p.diskWrite, s.diskWrite, secs)
+		util := map[string]float64{}
 		for dev, t := range s.busyByDev {
 			if o, ok := p.busyByDev[dev]; ok && t >= o && secs > 0 {
-				if u := float64(t-o) / (secs * 10); u > pt.DiskBusy { // ms → %
+				u := float64(t-o) / (secs * 10) // ms → %
+				if u > 100 {
+					u = 100
+				}
+				util[dev] = u
+				if u > pt.DiskBusy {
 					pt.DiskBusy = u
 				}
 			}
 		}
+		m.devUtil = util
 		if pt.DiskBusy > 100 {
 			pt.DiskBusy = 100
 		}
@@ -226,6 +237,24 @@ type DiskState struct {
 	Passed  *bool   `json:"smartPassed"` // nil = unknown
 	C       float64 `json:"celsius"`
 	At      int64   `json:"checkedAt"` // epoch ms
+	Cached  bool    `json:"cached"`    // health from an earlier reading (disk asleep)
+}
+
+// last known SMART health per disk (by-id name), kept across restarts so a sleeping disk
+// still shows its last result after a reboot
+func loadSmartStore() map[string]DiskState {
+	out := map[string]DiskState{}
+	if b, err := os.ReadFile(smartStore); err == nil {
+		_ = json.Unmarshal(b, &out)
+	}
+	return out
+}
+
+func saveSmartStore(m map[string]DiskState) {
+	b, _ := json.Marshal(m)
+	_ = os.MkdirAll("/var/lib/servercontrol", 0o750)
+	_ = os.WriteFile(smartStore+".tmp", b, 0o640)
+	_ = os.Rename(smartStore+".tmp", smartStore)
 }
 
 func physicalDisks() []string {
@@ -252,6 +281,9 @@ func (m *Metrics) readDiskStates() {
 		rot[d] = true
 	}
 	var temps []DiskTemp
+	ids := byIDNames()
+	store := loadSmartStore()
+	storeChanged := false
 	for _, d := range physicalDisks() {
 		res := run(context.Background(), 30*time.Second, nil, "smartctl", "-n", "standby", "-H", "-A", "-j", "/dev/"+d)
 		var j struct {
@@ -274,13 +306,22 @@ func (m *Metrics) readDiskStates() {
 		for _, msg := range j.Smartctl.Messages {
 			msgs += strings.ToUpper(msg.String) + " "
 		}
+		key := ids[d]
+		if key == "" {
+			key = "/dev/" + d
+		}
 		if strings.Contains(msgs, "STANDBY") || strings.Contains(msgs, "SLEEP") {
-			p := prev["/dev/"+d]
-			st = DiskState{Standby: true, Passed: p.Passed, C: p.C, At: p.At}
+			p, ok := prev["/dev/"+d]
+			if !ok || p.Passed == nil {
+				p = store[key]
+			}
+			st = DiskState{Standby: true, Passed: p.Passed, C: p.C, At: p.At, Cached: p.Passed != nil}
 		} else {
 			if j.SmartStatus != nil {
 				v := j.SmartStatus.Passed
 				st.Passed = &v
+				store[key] = DiskState{Passed: &v, C: j.Temperature.Current, At: st.At}
+				storeChanged = true
 			}
 			st.C = j.Temperature.Current
 		}
@@ -295,6 +336,9 @@ func (m *Metrics) readDiskStates() {
 			}
 			temps = append(temps, DiskTemp{Device: "/dev/" + d, Model: model, C: st.C, Standby: st.Standby})
 		}
+	}
+	if storeChanged {
+		saveSmartStore(store)
 	}
 	m.mu.Lock()
 	m.disks = states
@@ -313,7 +357,15 @@ func (m *Metrics) diskStates() map[string]DiskState {
 	return out
 }
 
+func (m *Metrics) utilOf(dev string) (float64, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	u, ok := m.devUtil[dev]
+	return u, ok
+}
+
 func (m *Metrics) Start() {
+	m.started = time.Now()
 	go func() {
 		m.step()
 		t := time.NewTicker(sampleEvery)
@@ -383,7 +435,39 @@ func handleHistory(w http.ResponseWriter, r *http.Request) {
 	metrics.mu.Lock()
 	h := append([]Point(nil), metrics.history...)
 	metrics.mu.Unlock()
-	writeJSON(w, 200, map[string]any{"intervalSeconds": int(sampleEvery.Seconds()), "points": h})
+	// everything since the agent started (at most 24 h), averaged down to maxChartPts points
+	per := (len(h) + maxChartPts - 1) / maxChartPts
+	if per < 1 {
+		per = 1
+	}
+	out := downsample(h, per)
+	writeJSON(w, 200, map[string]any{"intervalSeconds": int(sampleEvery.Seconds()) * per, "points": out, "spanSeconds": len(h) * int(sampleEvery.Seconds())})
+}
+
+func downsample(h []Point, per int) []Point {
+	if per <= 1 {
+		return h
+	}
+	out := make([]Point, 0, len(h)/per+1)
+	for i := 0; i < len(h); i += per {
+		end := i + per
+		if end > len(h) {
+			end = len(h)
+		}
+		var a Point
+		n := float64(end - i)
+		for _, p := range h[i:end] {
+			a.CPU += p.CPU / n
+			a.Mem += p.Mem / n
+			a.DiskRead += p.DiskRead / n
+			a.DiskWrite += p.DiskWrite / n
+			a.DiskBusy += p.DiskBusy / n
+			a.NetRx += p.NetRx / n
+			a.NetTx += p.NetTx / n
+		}
+		out = append(out, a)
+	}
+	return out
 }
 
 // scheduled shutdown/reboot (shutdown -r +N writes /run/systemd/shutdown/scheduled)

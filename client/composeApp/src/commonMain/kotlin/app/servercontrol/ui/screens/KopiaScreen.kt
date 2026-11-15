@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
 import kotlinx.serialization.json.JsonElement
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -51,47 +52,30 @@ import kotlinx.serialization.json.put
 
 @Composable
 fun KopiaScreen(api: ApiClient) {
-    var open by remember { mutableStateOf<KopiaRepo?>(null) }
     var edit by remember { mutableStateOf<KopiaRepoDef?>(null) }
     var refresh by remember { mutableStateOf(0) }
     var addMenu by remember { mutableStateOf(false) }
     var discover by remember { mutableStateOf(false) }
     var connect by remember { mutableStateOf(false) }
-    val o = open
-    if (o != null) {
-        KopiaRepoDetail(api, o) { open = null }
-        return
-    }
     Loader(refresh, { api.get<List<KopiaRepo>>("/api/kopia/repos", timeoutMs = 120_000) }) { repos, reload ->
-        Column(Modifier.fillMaxSize()) {
-            ListHeader("${repos.size} Repositories") {
-                AddButton({ addMenu = true }, "Repository hinzufügen")
-                RefreshButton(reload)
-            }
-            if (repos.isEmpty()) Text(
-                "Noch kein Repository eingetragen. Über + auf dem Server suchen, verbinden oder neu anlegen.",
-                Modifier.padding(16.dp),
-            )
-            LazyColumn {
-                itemsIndexed(repos, key = { _, r -> r.id }) { i, r ->
-                    StripedItem(
-                        i,
-                        leading = { StatusDot(if (r.connected) StatusOk else StatusBad) },
-                        headline = { Text(r.name, fontWeight = Bold) },
-                        supporting = {
-                            Column {
-                                Text(if (r.sources.isNotEmpty()) "Sicherung: " + r.sources.joinToString() else r.configFile, fontSize = TextSmall)
-                                r.error?.takeIf { it.isNotBlank() }?.let { Text(it.take(300), color = StatusBad, fontSize = TextSmall) }
-                            }
-                        },
-                        trailing = {
-                            IconButton(onClick = { edit = KopiaRepoDef(r.id, r.name, r.configFile, r.passwordFile, r.sources) }) {
-                                Icon(Icons.Default.Settings, "Einstellungen")
-                            }
-                        },
-                        onClick = { open = r },
-                    )
+        if (repos.isEmpty()) {
+            Column(Modifier.fillMaxSize()) {
+                ListHeader("Keine Repositories") {
+                    AddButton({ addMenu = true }, "Repository hinzufügen")
+                    RefreshButton(reload)
                 }
+            }
+            return@Loader
+        }
+        // one tab per repository (like the Nextcloud tabs)
+        val byTab = repos.associateBy { r -> if (repos.count { it.name == r.name } > 1) "${r.name} (${r.id})" else r.name }
+        TabbedScreen("tabs.kopia", byTab.keys.toList()) { tab ->
+            val r = byTab[tab] ?: return@TabbedScreen
+            key(r.id) {
+                if (!r.connected) r.error?.takeIf { it.isNotBlank() }?.let { ErrorCard(it.take(300)) }
+                KopiaRepoPage(api, r,
+                    onEditRepo = { edit = KopiaRepoDef(r.id, r.name, r.configFile, r.passwordFile, r.sources) },
+                    onAddRepo = { addMenu = true })
             }
         }
     }
@@ -263,7 +247,7 @@ private fun hoursOf(ns: Long?): String = ns?.let { n ->
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-private fun KopiaRepoDetail(api: ApiClient, repo: KopiaRepo, onBack: () -> Unit) {
+internal fun KopiaRepoPage(api: ApiClient, repo: KopiaRepo, onEditRepo: () -> Unit, onAddRepo: () -> Unit) {
     val host = rememberActionHost { api }
     var confirm by remember { mutableStateOf<Confirm?>(null) }
     var restore by remember { mutableStateOf<KopiaSnapshot?>(null) }
@@ -273,12 +257,20 @@ private fun KopiaRepoDetail(api: ApiClient, repo: KopiaRepo, onBack: () -> Unit)
     var maintAsk by remember { mutableStateOf(false) }
     var freshReq by remember { mutableStateOf(0) }
     var freshDone by remember { mutableStateOf(0) }
-    BackHandler { onBack() }
-    Column(Modifier.fillMaxSize()) {
-        Text(repo.name, Modifier.padding(start = 16.dp, top = 8.dp), fontWeight = Bold)
+    var history by remember(repo.id) { mutableStateOf<KopiaTarget?>(null) }
+    var policyOpen by remember(repo.id) { mutableStateOf<KopiaTarget?>(null) }
+    val hist = history
+    val pol = policyOpen
+    if (hist != null) {
+        BackHandler { history = null }
+        KopiaHistory(api, base, host, hist, tick) { restore = it }
+    } else if (pol != null) {
+        BackHandler { policyOpen = null }
+        KopiaPolicyEditor(api, base, host, pol) { policyOpen = null; tick++ }
+    } else Column(Modifier.fillMaxSize()) {
         // all actions in one row
         Row(
-            Modifier.fillMaxWidth().padding(start = 8.dp, end = 4.dp),
+            Modifier.fillMaxWidth().padding(start = 8.dp, end = 4.dp, top = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -296,13 +288,7 @@ private fun KopiaRepoDetail(api: ApiClient, repo: KopiaRepo, onBack: () -> Unit)
             SmallButton("Wartung", { maintAsk = true })
             Spacer(Modifier.weight(1f))
             RefreshButton { tick++ }
-        }
-        var tab by remember { mutableStateOf(0) }
-        var policyOpen by remember { mutableStateOf<KopiaTarget?>(null) }
-        ScrollableTabRow(selectedTabIndex = tab, edgePadding = 8.dp) {
-            listOf("Snapshots", "Richtlinien", "Aufgaben", "Repository", "Einstellungen").forEachIndexed { i, t ->
-                Tab(selected = tab == i, onClick = { tab = i }, text = { Text(t) })
-            }
+            GearMenu(listOf("Repository bearbeiten …" to onEditRepo, "Repository hinzufügen …" to onAddRepo))
         }
         Loader(Triple(repo.id, tick, freshReq), {
             // maintenance info is cached on the agent; "fresh" reads it again (wakes the disk)
@@ -311,58 +297,68 @@ private fun KopiaRepoDetail(api: ApiClient, repo: KopiaRepo, onBack: () -> Unit)
             api.getJson("$base/status" + if (fresh) "?fresh=1" else "", 120_000)
         }, showSpinnerOnReload = false) { status, _ ->
             val viaServer = status["via"].str == "server"
-            if (!viaServer && tab != 3) {
-                ErrorCard("Kein laufender Kopia-Server für dieses Repository gefunden – Richtlinien, Aufgaben und Einstellungen gibt es nur über den Server. Unten die Snapshots über die Kommandozeile (weckt die Platte).")
-                if (tab == 0) KopiaCliSnapshots(api, base, tick) { restore = it }
-                return@Loader
-            }
-            when (tab) {
-                0 -> KopiaSnapshotsTab(api, base, host, tick, onRestore = { restore = it }, onPolicy = { policyOpen = it; tab = 1 })
-                1 -> KopiaPoliciesTab(api, base, host, tick, policyOpen) { policyOpen = it }
-                2 -> KopiaTasksTab(api, base, host, tick)
-                3 -> LazyColumn {
-                    item {
-                        SectionCard("Repository", stateKey = "kopia-repo") {
-                            status["error"]?.let { Text(it.str, color = StatusBad) }
-                            val st = status["status"]
-                            val d = status["drive"]
-                            val total = d["total"].long ?: 0
-                            KeyValues(
-                                "Verzeichnis" to st["storage"]["config"]["path"].str.ifBlank { st["storage"]["type"].str },
-                                "Laufwerk" to (d["disk"].str.ifBlank { d["device"].str }.ifBlank { "–" }),
-                                "Name" to (d["model"].str.ifBlank { "–" } + (d["rotational"].bool?.let { if (it) " (HDD)" else " (SSD)" } ?: "")),
-                                "Ausnutzung" to if (total > 0) "${100 * (d["used"].long ?: 0) / total} % · ${formatBytes(d["used"].long)} von ${formatBytes(total)}" else "–",
-                                "Konfiguration" to repo.configFile,
-                                "Abfrage" to if (viaServer) "über den Kopia-Server (Platte bleibt im Standby)" else "Kommandozeile (weckt die Platte)",
-                            )
-                        }
+            CardColumn("cards.kopia") {
+                if (!viaServer) card("CLI") {
+                    Column {
+                        ErrorCard("Kein laufender Kopia-Server für dieses Repository – Richtlinien, Aufgaben und Einstellungen gibt es nur über den Server.")
+                        SectionCard("Snapshots") { KopiaCliSnapshots(api, base, tick) { restore = it } }
                     }
-                    if (viaServer) item { KopiaServerRepoCard(api, base, host, tick) }
-                    item(key = "maintenance") {
-                        SectionCard("Wartung", stateKey = "kopia-maint") {
-                            val m = status["maintenance"]
-                            val rows = mutableListOf(
-                                "Kurzwartung" to (if (m["quick"]["enabled"].bool == true) "alle ${hoursOf(m["quick"]["interval"].long)}" else "aus"),
-                                "Wartung" to (if (m["full"]["enabled"].bool == true) "alle ${hoursOf(m["full"]["interval"].long)}" else "aus"),
-                            )
-                            m["owner"].str.takeIf { it.isNotBlank() }?.let { rows += "Zuständig" to it }
-                            m["runs"].obj.forEach { (k, v) ->
-                                val last = v.arr.firstOrNull()
-                                if (last != null) rows += "Zuletzt $k" to localTime(last["end"].str) + if (last["success"].bool == false) " ✗" else " ✓"
-                            }
-                            status["maintenanceAt"].long?.takeIf { it > 0 }?.let { rows += "Stand" to formatTime(it).dropLast(3) }
-                            rows.forEachIndexed { i, (k, v) -> KeyValue(k, v, i) }
-                            Text("Laufen die Wartungen über eigene Skripte (z. B. nach dem Snapshot), hier „aus“ lassen. " +
-                                "Die Wartungsinfo wird zwischengespeichert, weil das Lesen die Platte weckt.", fontSize = TextSmall)
-                            ButtonRow {
-                                SmallButton("Wartung einstellen", { editMaint = m ?: kotlinx.serialization.json.JsonObject(emptyMap()) })
-                                SmallButton("Neu lesen", { freshReq++ })
-                            }
-                        }
-                    }
-                    item { Spacer(Modifier.heightIn(min = 24.dp)) }
                 }
-                else -> KopiaPrefsTab(api, base, host, tick)
+                if (viaServer) {
+                    card("Snapshots") {
+                        SectionCard("Snapshots", stateKey = "kopia-snapshots") {
+                            KopiaSnapshotsTab(api, base, host, tick, onRestore = { restore = it }, onPolicy = { policyOpen = it }, onOpenSource = { history = it })
+                        }
+                    }
+                    card("Richtlinien") {
+                        SectionCard("Richtlinien", stateKey = "kopia-policies", initiallyCollapsed = true) {
+                            KopiaPoliciesTab(api, base, host, tick, null) { policyOpen = it }
+                        }
+                    }
+                    card("Aufgaben") {
+                        SectionCard("Aufgaben", stateKey = "kopia-tasks", initiallyCollapsed = true) { KopiaTasksTab(api, base, host, tick) }
+                    }
+                }
+                card("Repository") {
+                    SectionCard("Repository", stateKey = "kopia-repo", initiallyCollapsed = true) {
+                        status["error"]?.let { Text(it.str, color = StatusBad) }
+                        val st = status["status"]
+                        val d = status["drive"]
+                        val total = d["total"].long ?: 0
+                        KeyValues(
+                            "Verzeichnis" to st["storage"]["config"]["path"].str.ifBlank { st["storage"]["type"].str },
+                            "Laufwerk" to (d["disk"].str.ifBlank { d["device"].str }.ifBlank { "–" }),
+                            "Name" to (d["model"].str.ifBlank { "–" } + (d["rotational"].bool?.let { if (it) " (HDD)" else " (SSD)" } ?: "")),
+                            "Ausnutzung" to if (total > 0) "${100 * (d["used"].long ?: 0) / total} % · ${formatBytes(d["used"].long)} von ${formatBytes(total)}" else "–",
+                            "Konfiguration" to repo.configFile,
+                            "Abfrage" to if (viaServer) "über den Kopia-Server" else "Kommandozeile",
+                        )
+                    }
+                }
+                if (viaServer) card("Server") { KopiaServerRepoCard(api, base, host, tick) }
+                card("Wartung") {
+                    SectionCard("Wartung", stateKey = "kopia-maint", initiallyCollapsed = true) {
+                        val m = status["maintenance"]
+                        val rows = mutableListOf(
+                            "Kurzwartung" to (if (m["quick"]["enabled"].bool == true) "alle ${hoursOf(m["quick"]["interval"].long)}" else "aus"),
+                            "Wartung" to (if (m["full"]["enabled"].bool == true) "alle ${hoursOf(m["full"]["interval"].long)}" else "aus"),
+                        )
+                        m["schedule"]["nextQuickMaintenance"].str.takeIf { it.isNotBlank() && m["quick"]["enabled"].bool == true }?.let { rows += "Nächste Kurzwartung" to localTime(it) }
+                        m["schedule"]["nextFullMaintenance"].str.takeIf { it.isNotBlank() && m["full"]["enabled"].bool == true }?.let { rows += "Nächste Wartung" to localTime(it) }
+                        m["owner"].str.takeIf { it.isNotBlank() }?.let { rows += "Zuständig" to it }
+                        m["runs"].obj.forEach { (k, v) ->
+                            val last = v.arr.firstOrNull()
+                            if (last != null) rows += "Zuletzt $k" to localTime(last["end"].str) + if (last["success"].bool == false) " ✗" else " ✓"
+                        }
+                        status["maintenanceAt"].long?.takeIf { it > 0 }?.let { rows += "Stand" to formatTime(it).dropLast(3) }
+                        rows.forEachIndexed { i, (k, v) -> KeyValue(k, v, i) }
+                        ButtonRow {
+                            SmallButton("Zeitplan", { editMaint = m ?: kotlinx.serialization.json.JsonObject(emptyMap()) })
+                            SmallButton("Neu lesen", { freshReq++ })
+                        }
+                    }
+                }
+                if (viaServer) card("Benachrichtigungen") { KopiaPrefsTab(api, base, host, tick) }
             }
         }
     }
@@ -374,7 +370,6 @@ private fun KopiaRepoDetail(api: ApiClient, repo: KopiaRepo, onBack: () -> Unit)
         title = { Text("Wartung starten") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Kurzwartung räumt Indexe auf und geht schnell. Die vollständige Wartung entfernt außerdem abgelaufene Snapshots und nicht mehr benötigte Daten – das kann bei großen Repositories lange dauern.", fontSize = TextSmall)
                 Button(onClick = { maintAsk = false; host.post("Kurzwartung", "$base/quick-maintenance") }, Modifier.fillMaxWidth()) { Text("Kurzwartung") }
                 Button(onClick = { maintAsk = false; host.post("Wartung", "$base/maintenance") }, Modifier.fillMaxWidth()) { Text("Vollständige Wartung") }
             }
@@ -418,8 +413,8 @@ private fun KopiaRepoDetail(api: ApiClient, repo: KopiaRepo, onBack: () -> Unit)
 private fun KopiaCliSnapshots(api: ApiClient, base: String, tick: Int, onSelect: (KopiaSnapshot) -> Unit) {
     Loader(base to tick, { api.get<List<KopiaSnapshot>>("$base/snapshots", timeoutMs = 180_000) }) { snaps, _ ->
         val list = snaps.sortedByDescending { isoToMs(it.startTime) ?: 0L }
-        LazyColumn {
-            itemsIndexed(list) { i, s ->
+        Column {
+            list.forEachIndexed { i, s ->
                 StripedItem(
                     i,
                     headline = { Text(localTime(s.startTime)) },
@@ -438,29 +433,40 @@ private fun MaintenanceEditor(base: String, m: JsonElement, host: ActionHost, on
     var full by remember { mutableStateOf(m["full"]["enabled"].bool == true) }
     var quickH by remember { mutableStateOf(h(m["quick"]["interval"].long)) }
     var fullH by remember { mutableStateOf(h(m["full"]["interval"].long)) }
+    fun clockOf(iso: String) = iso.takeIf { it.isNotBlank() }?.let { localTime(it).takeLast(5) } ?: ""
+    var quickT by remember { mutableStateOf(clockOf(m["schedule"]["nextQuickMaintenance"].str)) }
+    var fullT by remember { mutableStateOf(clockOf(m["schedule"]["nextFullMaintenance"].str)) }
+    val clockOk = { t: String -> t.isBlank() || Regex("""^([01]?\d|2[0-3]):[0-5]\d$""").matches(t) }
     AppDialog(
         onDismissRequest = onDone,
-        title = { Text("Automatische Wartung") },
+        title = { Text("Zeitplan der Wartung") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Wird vom Kopia-Dienst ausgeführt und weckt dafür die Platte des Repositorys.", fontSize = TextSmall)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Kurzwartung", Modifier.weight(1f)); Switch(quick, { quick = it })
                 }
-                OutlinedTextField(quickH, { quickH = it.filter(Char::isDigit).take(4) }, Modifier.fillMaxWidth(), label = { Text("alle … Stunden") }, singleLine = true, enabled = quick)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(quickH, { quickH = it.filter(Char::isDigit).take(4) }, Modifier.weight(1f), label = { Text("alle … Stunden") }, singleLine = true, enabled = quick)
+                    OutlinedTextField(quickT, { quickT = it.filter { c -> c.isDigit() || c == ':' }.take(5) }, Modifier.weight(1f), label = { Text("Uhrzeit") }, placeholder = { Text("03:00") }, singleLine = true, enabled = quick, isError = !clockOk(quickT))
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Wartung", Modifier.weight(1f)); Switch(full, { full = it })
                 }
-                OutlinedTextField(fullH, { fullH = it.filter(Char::isDigit).take(4) }, Modifier.fillMaxWidth(), label = { Text("alle … Stunden") }, singleLine = true, enabled = full)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(fullH, { fullH = it.filter(Char::isDigit).take(4) }, Modifier.weight(1f), label = { Text("alle … Stunden") }, singleLine = true, enabled = full)
+                    OutlinedTextField(fullT, { fullT = it.filter { c -> c.isDigit() || c == ':' }.take(5) }, Modifier.weight(1f), label = { Text("Uhrzeit") }, placeholder = { Text("04:00") }, singleLine = true, enabled = full, isError = !clockOk(fullT))
+                }
             }
         },
         confirmButton = {
-            TextButton(onClick = {
+            TextButton(enabled = clockOk(quickT) && clockOk(fullT), onClick = {
                 val body = buildJsonObject {
                     put("quickEnabled", quick); put("fullEnabled", full)
                     put("quickHours", quickH.toIntOrNull() ?: 0); put("fullHours", fullH.toIntOrNull() ?: 0)
+                    if (quick && quickT.isNotBlank()) put("quickTime", quickT)
+                    if (full && fullT.isNotBlank()) put("fullTime", fullT)
                 }.toString()
-                host.post("Wartung eingestellt", "$base/maintenance-schedule", body, onDone)
+                host.post("Zeitplan gespeichert", "$base/maintenance-schedule", body, onDone)
             }) { Text("Speichern") }
         },
         dismissButton = { TextButton(onClick = onDone) { Text("Abbrechen") } },

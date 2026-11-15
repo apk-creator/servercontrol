@@ -190,10 +190,11 @@ fun SectionCard(
 ) {
     val key = stateKey ?: title ?: ""
     val closed = collapsible && title != null && (CardState.collapsed[key] ?: initiallyCollapsed)
+    val dragHandle = LocalCardDragHandle.current
     Card(modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
         Column(Modifier.padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = if (closed) 4.dp else 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             if (title != null) {
-                Row(Modifier.fillMaxWidth().heightIn(min = 40.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().heightIn(min = 40.dp).then(dragHandle), verticalAlignment = Alignment.CenterVertically) {
                     Text(title, Modifier.weight(1f), fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                     actions()
                     if (collapsible) {
@@ -208,7 +209,10 @@ fun SectionCard(
                 }
             }
             if (!closed) {
-                Column(Modifier.padding(end = 8.dp, top = if (title == null) 8.dp else 0.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) { content() }
+                // cards inside this card are not moved with this card's handle
+                androidx.compose.runtime.CompositionLocalProvider(LocalCardDragHandle provides Modifier) {
+                    Column(Modifier.padding(end = 8.dp, top = if (title == null) 8.dp else 0.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) { content() }
+                }
             }
         }
     }

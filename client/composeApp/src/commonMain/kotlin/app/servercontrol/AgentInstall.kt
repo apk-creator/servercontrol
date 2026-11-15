@@ -29,7 +29,7 @@ fun AgentMissingCard(state: AppState, profile: ServerProfile) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Kein Agent gefunden", style = MaterialTheme.typography.titleMedium)
             Text(
-                "Die App kann den Agent ${APP_VERSION} selbst installieren: per SSH mit sudo, ohne Download auf dem Server. " +
+                "Die App kann den Agent ${APP_VERSION} selbst installieren: Sie lädt ihn aus dem GitHub-Release und richtet ihn per SSH mit sudo ein. " +
                     "Danach ist das Zertifikat bereits bestätigt und die App meldet sich an.",
                 fontSize = TextSmall,
             )

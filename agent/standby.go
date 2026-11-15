@@ -204,6 +204,10 @@ func handleStandbySet(w http.ResponseWriter, r *http.Request) {
 	foreign := map[string]bool{}
 	for _, u := range foreignStandbyUnits(r) {
 		foreign[u["unit"].(string)] = true
+		// hd-idle manages the disks alone: other units that set hdparm timers are switched off
+		if req.Method == "hdidle" && u["enabled"] == true && !contains(req.DisableUnits, u["unit"].(string)) {
+			req.DisableUnits = append(req.DisableUnits, u["unit"].(string))
+		}
 	}
 	ctx := r.Context()
 	var log []string
@@ -280,6 +284,9 @@ func handleStandbySet(w http.ResponseWriter, r *http.Request) {
 	_ = os.WriteFile(standbyConfig, b, 0o600)
 	logf("standby: method=%q disks=%d disabled=%v", req.Method, len(req.Disks), req.DisableUnits)
 	msg := "Auto-Standby gespeichert."
+	if len(req.DisableUnits) > 0 {
+		msg += " Abgeschaltet (setzte eigene Standby-Zeiten): " + strings.Join(req.DisableUnits, ", ") + "."
+	}
 	if len(log) > 0 {
 		msg += " Hinweise: " + strings.Join(log, "; ")
 	}
@@ -302,4 +309,13 @@ func handleStandbySleep(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleStandbyInstall(w http.ResponseWriter, r *http.Request) {
 	jobStarted(w, s.jobs.Start("hd-idle installieren", 10*time.Minute, []string{"DEBIAN_FRONTEND=noninteractive"},
 		"apt-get", "install", "-y", "--no-install-recommends", "hd-idle", "hdparm"))
+}
+
+func contains(l []string, v string) bool {
+	for _, x := range l {
+		if x == v {
+			return true
+		}
+	}
+	return false
 }

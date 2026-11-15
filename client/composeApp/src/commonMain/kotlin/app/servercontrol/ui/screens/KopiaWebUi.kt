@@ -122,17 +122,13 @@ private fun kDuration(a: String, b: String): String {
 // ---------------- Snapshots tab ----------------
 
 @Composable
-internal fun KopiaSnapshotsTab(api: ApiClient, base: String, host: ActionHost, tick: Int, onRestore: (KopiaSnapshot) -> Unit, onPolicy: (KopiaTarget) -> Unit) {
+internal fun KopiaSnapshotsTab(api: ApiClient, base: String, host: ActionHost, tick: Int, onRestore: (KopiaSnapshot) -> Unit, onPolicy: (KopiaTarget) -> Unit, onOpenSource: (KopiaTarget) -> Unit) {
     var openSource by remember { mutableStateOf<KopiaTarget?>(null) }
+    // the snapshot history opens as its own page (see KopiaRepoDetail)
+    LaunchedEffect(openSource) { openSource?.let { onOpenSource(it); openSource = null } }
     var newSnap by remember { mutableStateOf(false) }
     var srcMenu by remember { mutableStateOf<JsonElement?>(null) }
     var refresh by remember { mutableStateOf(0) }
-    val os = openSource
-    if (os != null) {
-        BackHandler { openSource = null }
-        KopiaHistory(api, base, host, os, tick + refresh, onRestore)
-        return
-    }
     // sources refresh by themselves while a snapshot is running
     var live by remember { mutableStateOf(0) }
     Loader(Triple(tick, refresh, live), { api.getJson("$base/srv/sources") }) { d, _ ->
@@ -147,8 +143,8 @@ internal fun KopiaSnapshotsTab(api: ApiClient, base: String, host: ActionHost, t
                 AddButton({ newSnap = true }, "Neuer Snapshot")
                 RefreshButton { refresh++ }
             }
-            LazyColumn(Modifier.fillMaxSize()) {
-                itemsIndexed(sources) { i, s ->
+            Column {
+                sources.forEachIndexed { i, s ->
                     val t = KopiaTarget.of(s["source"])
                     val last = s["lastSnapshot"]
                     val size = last.at("rootEntry.summ.size").long ?: last.at("stats.totalSize").long
@@ -223,7 +219,7 @@ internal fun KopiaSnapshotsTab(api: ApiClient, base: String, host: ActionHost, t
 }
 
 @Composable
-private fun KopiaHistory(api: ApiClient, base: String, host: ActionHost, t: KopiaTarget, tick: Int, onRestore: (KopiaSnapshot) -> Unit) {
+internal fun KopiaHistory(api: ApiClient, base: String, host: ActionHost, t: KopiaTarget, tick: Int, onRestore: (KopiaSnapshot) -> Unit) {
     var all by remember { mutableStateOf(false) }
     var refresh by remember { mutableStateOf(0) }
     var menu by remember { mutableStateOf<JsonElement?>(null) }
@@ -387,8 +383,8 @@ internal fun KopiaPoliciesTab(api: ApiClient, base: String, host: ActionHost, ti
                 AddButton({ adding = true }, "Richtlinie anlegen")
                 RefreshButton { refresh++ }
             }
-            LazyColumn(Modifier.fillMaxSize()) {
-                itemsIndexed(list) { i, (t, p) ->
+            Column {
+                list.forEachIndexed { i, (t, p) ->
                     val parts = listOfNotNull(
                         p.at("retention")?.let { "Aufbewahrung" },
                         p.at("files")?.let { "Dateien" },
@@ -725,8 +721,8 @@ internal fun KopiaTasksTab(api: ApiClient, base: String, host: ActionHost, tick:
                 RefreshButton { refresh++ }
             }
             if (tasks.isEmpty()) Text("Keine Aufgaben seit dem Start des Kopia-Servers.", Modifier.padding(16.dp))
-            LazyColumn(Modifier.fillMaxSize()) {
-                itemsIndexed(tasks) { i, x ->
+            Column {
+                tasks.forEachIndexed { i, x ->
                     val st = x["status"].str
                     StripedItem(
                         i,
@@ -812,7 +808,6 @@ internal fun KopiaServerRepoCard(api: ApiClient, base: String, host: ActionHost,
                     host.post("Abgleich", "$base/srv/repo/sync", after = { refresh++ })
                 })
             }
-            Text("„Abgleichen“ liest neue Snapshots und Richtlinien aus dem Repository ein (z. B. nach Änderungen per Kommandozeile) und weckt dafür die Platte.", fontSize = TextSmall)
         }
     }
     editDesc?.let { cur ->
@@ -845,12 +840,11 @@ internal fun KopiaPrefsTab(api: ApiClient, base: String, host: ActionHost, tick:
     var confirm by remember { mutableStateOf<Confirm?>(null) }
     Loader(tick to refresh, { api.getJson("$base/srv/notificationProfiles") }) { d, _ ->
         val list = (d as? JsonArray) ?: d["profiles"].arr
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+        Column {
             SectionCard("Benachrichtigungen", stateKey = "kopia-notify", actions = {
                 AddButton({ edit = buildJsonObject { put("profile", ""); put("minSeverity", 0); put("method", buildJsonObject { put("type", "email"); put("config", JsonObject(emptyMap())) }) } }, "Profil anlegen")
                 RefreshButton { refresh++ }
             }) {
-                Text("Der Kopia-Server meldet Snapshots, Wartung und Fehler über diese Profile.", fontSize = TextSmall)
                 if (list.isEmpty()) Text("Keine Profile.", fontSize = TextSmall)
                 list.forEachIndexed { i, pr ->
                     Row(Modifier.fillMaxWidth().background(stripe(i)).clickable { menu = pr }.padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -861,9 +855,6 @@ internal fun KopiaPrefsTab(api: ApiClient, base: String, host: ActionHost, tick:
                         IconButton(onClick = { menu = pr }) { Icon(Icons.Default.Settings, "Aktionen", Modifier.size(20.dp)) }
                     }
                 }
-            }
-            SectionCard("Darstellung", stateKey = "kopia-ui-prefs") {
-                Text("Design, Schriftgröße und Byte-Darstellung der Kopia-Weboberfläche betreffen nur den Browser; die App nutzt ihre eigene Darstellung.", fontSize = TextSmall)
             }
         }
     }

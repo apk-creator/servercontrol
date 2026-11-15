@@ -302,16 +302,9 @@ actual suspend fun installAppUpdate(api: app.servercontrol.net.ApiClient, certFi
         throw e
     }
     UpdateService.stop()
-    val uri = androidx.core.content.FileProvider.getUriForFile(ctx, "${ctx.packageName}.files", file)
-    val intent = Intent(Intent.ACTION_VIEW)
-        .setDataAndType(uri, "application/vnd.android.package-archive")
-        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-    // Android does not allow opening the installer from the background → notification instead
-    if (!UpdateService.appVisible || runCatching { ctx.startActivity(intent) }.isFailure) {
-        UpdateService.ready(intent)
-        return "Update heruntergeladen – zum Installieren auf die Benachrichtigung „Update bereit“ tippen."
-    }
-    return "Die Installation wurde gestartet. Falls Android nachfragt: „Unbekannte Apps installieren“ für ServerControl erlauben."
+    withContext(Dispatchers.IO) { ApkInstaller.install(ctx, file) }
+    return if (UpdateService.appVisible) "Die Installation wurde gestartet. Falls Android nachfragt: „Unbekannte Apps installieren“ für ServerControl erlauben."
+    else "Update heruntergeladen – zum Installieren auf die Benachrichtigung „Update bereit“ tippen."
 }
 
 // ---------------- fast download (app update) ----------------
@@ -369,7 +362,31 @@ internal suspend fun fastDownload(
 
 actual val deviceName: String = "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}".trim()
 
-// the APK packager unpacks .gz assets: servercontrol-agent.tar.gz arrives as servercontrol-agent.tar
-actual fun bundledAgentPackage(): ByteArray? = listOf("agent/servercontrol-agent.tar", "agent/servercontrol-agent.tar.gz").firstNotNullOfOrNull { name ->
-    runCatching { AppContext.app.assets.open(name).use { it.readBytes() } }.getOrNull()
+// the APK carries no Linux binary (Play Protect): the agent comes from the GitHub release
+actual suspend fun agentPackage(): ByteArray = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { downloadAgentRelease() }
+
+/** Agent package of this app version from the public GitHub release, checked against GitHub's SHA-256. */
+internal fun downloadAgentRelease(): ByteArray {
+    fun get(url: String, accept: String): java.net.HttpURLConnection =
+        (java.net.URL(url).openConnection() as java.net.HttpURLConnection).apply {
+            connectTimeout = 15_000; readTimeout = 60_000; instanceFollowRedirects = true
+            setRequestProperty("Accept", accept); setRequestProperty("User-Agent", "ServerControl/$APP_VERSION")
+        }
+    val api = get("https://api.github.com/repos/$APP_REPO/releases/tags/v$APP_VERSION", "application/vnd.github+json")
+    if (api.responseCode != 200) throw Exception("Release v$APP_VERSION nicht gefunden (HTTP ${api.responseCode})")
+    val rel = app.servercontrol.data.AppJson.parseToJsonElement(api.inputStream.use { it.readBytes().decodeToString() })
+    val asset = (rel as kotlinx.serialization.json.JsonObject)["assets"]!!.let { it as kotlinx.serialization.json.JsonArray }
+        .map { it as kotlinx.serialization.json.JsonObject }
+        .firstOrNull { (it["name"] as? kotlinx.serialization.json.JsonPrimitive)?.content == "servercontrol-agent.tar.gz" }
+        ?: throw Exception("Release v$APP_VERSION enthält kein Agent-Paket")
+    val url = (asset["browser_download_url"] as kotlinx.serialization.json.JsonPrimitive).content
+    val digest = (asset["digest"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.removePrefix("sha256:")
+        ?: throw Exception("Release ohne Prüfsumme")
+    val conn = get(url, "application/octet-stream")
+    if (conn.responseCode != 200) throw Exception("Download fehlgeschlagen (HTTP ${conn.responseCode})")
+    val data = conn.inputStream.use { it.readBytes() }
+    val sum = java.security.MessageDigest.getInstance("SHA-256").digest(data).joinToString("") { "%02x".format(it) }
+    if (!sum.equals(digest, ignoreCase = true)) throw Exception("Prüfsumme des Agent-Pakets stimmt nicht")
+    return data
 }
+

@@ -44,22 +44,16 @@ private val jobNames = mapOf(
 )
 
 @Composable
-fun ImmichMain(api: ApiClient, onSetup: () -> Unit) {
-    var tab by remember { mutableStateOf(0) }
+fun ImmichMain(api: ApiClient, mod: kotlinx.serialization.json.JsonElement, onSetupDone: () -> Unit) {
     val host = rememberActionHost { api }
     var confirm by remember { mutableStateOf<Confirm?>(null) }
-    Column(Modifier.fillMaxSize()) {
-        ScrollableTabRow(selectedTabIndex = tab, edgePadding = 8.dp) {
-            listOf("Status", "Aufträge", "Benutzer", "Bibliotheken", "Einrichtung").forEachIndexed { i, t ->
-                Tab(selected = tab == i, onClick = { tab = i }, text = { Text(t) })
-            }
-        }
+    TabbedScreen("tabs.immich", listOf("Status", "Aufträge", "Benutzer", "Bibliotheken", "Einrichtung")) { tab ->
         when (tab) {
-            0 -> ImmichStatus(api)
-            1 -> ImmichJobs(api, host)
-            2 -> ImmichUsers(api, host) { confirm = it }
-            3 -> ImmichLibraries(api, host)
-            4 -> LaunchedEffect(Unit) { tab = 0; onSetup() }
+            "Status" -> ImmichStatus(api)
+            "Aufträge" -> ImmichJobs(api, host)
+            "Benutzer" -> ImmichUsers(api, host) { confirm = it }
+            "Bibliotheken" -> ImmichLibraries(api, host)
+            "Einrichtung" -> ImmichSetup(api, mod, onSetupDone)
         }
     }
     ConfirmDialog(confirm) { confirm = null }
@@ -238,16 +232,12 @@ private fun ImmichLibraries(api: ApiClient, host: ActionHost) {
 @Composable
 fun ImmichScreen(api: ApiClient) {
     var refresh by remember { mutableStateOf(0) }
-    var setup by remember { mutableStateOf(false) }
     Loader(refresh, { api.getJson("/api/config") }) { cfg, _ ->
         val mod = cfg["immich"]
-        if (mod["enabled"].bool != true || setup) {
-            Column(Modifier.fillMaxSize()) {
-                BackHandler(setup) { setup = false }
-                ImmichSetup(api, mod) { setup = false; refresh++ }
-            }
+        if (mod["enabled"].bool != true) {
+            Column(Modifier.fillMaxSize()) { ImmichSetup(api, mod) { refresh++ } }
         } else {
-            ImmichMain(api) { setup = true }
+            ImmichMain(api, mod) { refresh++ }
         }
     }
 }

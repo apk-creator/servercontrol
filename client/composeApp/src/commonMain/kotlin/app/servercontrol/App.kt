@@ -256,21 +256,14 @@ fun LoginScreen(state: AppState, profile: ServerProfile) {
 fun Section.icon(): ImageVector = when (this) {
     Section.OVERVIEW -> Icons.Default.Dashboard
     Section.TERMINAL -> Icons.Default.Terminal
-    Section.SSH_KEYS -> Icons.Default.Key
     Section.AGENT -> Icons.Default.Settings
-    Section.SERVICES -> Icons.Default.SettingsApplications
-    Section.CONTAINERS -> Icons.Default.ViewInAr
-    Section.LOGS -> Icons.AutoMirrored.Filled.List
-    Section.STORAGE -> Icons.Default.Storage
+    Section.SYSTEM -> Icons.Default.Dns
     Section.FILES -> Icons.Default.Folder
-    Section.NETWORK -> Icons.Default.Lan
-    Section.PROCESSES -> Icons.Default.Memory
     Section.UPDATES -> Icons.Default.SystemUpdate
     Section.ACCOUNTS -> Icons.Default.People
     Section.KOPIA -> Icons.Default.Backup
     Section.NEXTCLOUD -> Icons.Default.Cloud
     Section.IMMICH -> Icons.Default.PhotoLibrary
-    Section.JOBS -> Icons.Default.Pending
     Section.SHELL -> Icons.Default.Code
 }
 
@@ -326,6 +319,7 @@ fun MainScreen(state: AppState) {
                     navigationIcon = {
                         if (!wide) IconButton(onClick = { scope.launch { drawer.open() } }) { Icon(Icons.Default.Menu, "Menü") }
                     },
+                    actions = { HelpButton(state.section) },
                 )
             }) { pad ->
                 // keyboard pushes the content up (Android 15 draws edge-to-edge)
@@ -374,23 +368,16 @@ private fun UpdateNotice(state: AppState) {
 fun SectionContent(state: AppState, session: Session) {
     val api = session.api
     when (state.section) {
-        Section.OVERVIEW -> OverviewScreen(api) { state.navigate(it) }
+        Section.OVERVIEW -> OverviewScreen(api) { state.openSystemTab(it) }
+        Section.SYSTEM -> SystemScreen(state, api)
         Section.TERMINAL -> TerminalScreen(state, session)
-        Section.SSH_KEYS -> SshKeysScreen(state, session)
         Section.AGENT -> AgentScreen(state, api)
-        Section.SERVICES -> ServicesScreen(api)
-        Section.CONTAINERS -> ContainersScreen(api)
-        Section.LOGS -> LogsScreen(api)
-        Section.STORAGE -> StorageScreen(api)
         Section.FILES -> FilesScreen(api)
-        Section.NETWORK -> NetworkScreen(api)
-        Section.PROCESSES -> ProcessesScreen(api)
         Section.UPDATES -> UpdatesScreen(state, api)
         Section.ACCOUNTS -> AccountsScreen(api)
         Section.KOPIA -> KopiaScreen(api)
         Section.NEXTCLOUD -> NextcloudScreen(api)
         Section.IMMICH -> ImmichScreen(api)
-        Section.JOBS -> JobsScreen(api)
         Section.SHELL -> ShellScreen(api)
     }
 }

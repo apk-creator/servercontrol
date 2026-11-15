@@ -45,6 +45,8 @@ data class ProfileVault(
     val lastProfileId: String? = null,
     /** order of the side menu (Section names), changed by drag & drop */
     val sectionOrder: List<String> = emptyList(),
+    /** order of tabs and cards per screen (long-press + drag) */
+    val uiOrder: Map<String, List<String>> = emptyMap(),
 )
 
 // ---------------- API DTOs ----------------
@@ -116,7 +118,7 @@ data class MetricPoint(
 )
 
 @Serializable
-data class MetricHistory(val intervalSeconds: Int = 5, val points: List<MetricPoint> = emptyList())
+data class MetricHistory(val intervalSeconds: Int = 5, val points: List<MetricPoint> = emptyList(), val spanSeconds: Int = 0)
 
 @Serializable
 data class ServiceUnit(
