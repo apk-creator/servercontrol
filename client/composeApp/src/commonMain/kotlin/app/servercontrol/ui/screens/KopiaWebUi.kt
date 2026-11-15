@@ -660,7 +660,7 @@ private class PolicyCtx(
             val parts = v.split(',', ' ', ';').map { it.trim() }.filter { it.isNotEmpty() }
             val parsed = parts.map { s -> Regex("""^(\d{1,2}):(\d{2})$""").find(s)?.groupValues?.let { it[1].toInt() to it[2].toInt() } }
             bad = parsed.any { it == null || it.first > 23 || it.second > 59 }
-            if (!bad) set(path, if (parsed.isEmpty()) null else JsonArray(parsed.map { (h, m) -> buildJsonObject { put("hour", h!!); put("min", m!!) } }))
+            if (!bad) set(path, if (parsed.isEmpty()) null else JsonArray(parsed.filterNotNull().map { (h, m) -> buildJsonObject { put("hour", h); put("min", m) } }))
         }, Modifier.fillMaxWidth(), label = { Text(label) }, singleLine = true, isError = bad, placeholder = { Text("z. B. 01:00, 13:30") })
         Effective(path)
     }
