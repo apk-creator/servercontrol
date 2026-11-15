@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -511,10 +512,12 @@ func (s *Server) handleKopiaMaintSet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		QuickEnabled bool `json:"quickEnabled"`
-		FullEnabled  bool `json:"fullEnabled"`
-		QuickHours   int  `json:"quickHours"`
-		FullHours    int  `json:"fullHours"`
+		QuickEnabled bool   `json:"quickEnabled"`
+		FullEnabled  bool   `json:"fullEnabled"`
+		QuickHours   int    `json:"quickHours"`
+		FullHours    int    `json:"fullHours"`
+		QuickTime    string `json:"quickTime"` // "HH:MM" server time of the next run (empty = keep)
+		FullTime     string `json:"fullTime"`
 	}
 	if err := readJSON(r, &req); err != nil {
 		writeErr(w, 400, err.Error())
@@ -527,6 +530,18 @@ func (s *Server) handleKopiaMaintSet(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.FullHours > 0 && req.FullHours <= 24*366 {
 		args = append(args, "--full-interval="+strconv.Itoa(req.FullHours)+"h")
+	}
+	// a clock time: postpone the next run to that time; with 24-h intervals it stays there
+	for _, t := range []struct{ val, flag string }{{req.QuickTime, "--pause-quick="}, {req.FullTime, "--pause-full="}} {
+		if t.val == "" {
+			continue
+		}
+		d, err := untilClock(t.val, time.Now())
+		if err != nil {
+			writeErr(w, 400, err.Error())
+			return
+		}
+		args = append(args, t.flag+strconv.Itoa(int(d.Minutes()))+"m")
 	}
 	logf("kopia %s: %v", k.ID, args)
 	dropCLICache(k.ID)
@@ -591,4 +606,21 @@ func kopiaServerAction(r *http.Request, srv *kopiaSrv, k KopiaRepo, action, sour
 		}
 	}
 	return "", false
+}
+
+var clockRe = regexp.MustCompile(`^([01]?[0-9]|2[0-3]):([0-5][0-9])$`)
+
+// untilClock: time from now until the next HH:MM (local time of the server)
+func untilClock(hhmm string, now time.Time) (time.Duration, error) {
+	m := clockRe.FindStringSubmatch(hhmm)
+	if m == nil {
+		return 0, fmt.Errorf("Uhrzeit HH:MM erwartet")
+	}
+	h, _ := strconv.Atoi(m[1])
+	mi, _ := strconv.Atoi(m[2])
+	next := time.Date(now.Year(), now.Month(), now.Day(), h, mi, 0, 0, now.Location())
+	if !next.After(now.Add(time.Minute)) {
+		next = next.Add(24 * time.Hour)
+	}
+	return next.Sub(now), nil
 }

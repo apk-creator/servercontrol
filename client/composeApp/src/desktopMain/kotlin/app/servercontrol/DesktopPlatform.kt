@@ -316,5 +316,33 @@ internal suspend fun fastDownload(
 actual val deviceName: String = runCatching { java.net.InetAddress.getLocalHost().hostName }.getOrNull()
     ?.takeIf { it.isNotBlank() }?.let { "$it (${System.getProperty("os.name")})" } ?: System.getProperty("os.name")
 
-actual fun bundledAgentPackage(): ByteArray? =
+actual suspend fun agentPackage(): ByteArray = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
     runCatching { object {}.javaClass.getResourceAsStream("/agent/servercontrol-agent.tar.gz")?.use { it.readBytes() } }.getOrNull()
+        ?: downloadAgentRelease()
+}
+
+/** Agent package of this app version from the public GitHub release, checked against GitHub's SHA-256. */
+internal fun downloadAgentRelease(): ByteArray {
+    fun get(url: String, accept: String): java.net.HttpURLConnection =
+        (java.net.URL(url).openConnection() as java.net.HttpURLConnection).apply {
+            connectTimeout = 15_000; readTimeout = 60_000; instanceFollowRedirects = true
+            setRequestProperty("Accept", accept); setRequestProperty("User-Agent", "ServerControl/$APP_VERSION")
+        }
+    val api = get("https://api.github.com/repos/$APP_REPO/releases/tags/v$APP_VERSION", "application/vnd.github+json")
+    if (api.responseCode != 200) throw Exception("Release v$APP_VERSION nicht gefunden (HTTP ${api.responseCode})")
+    val rel = app.servercontrol.data.AppJson.parseToJsonElement(api.inputStream.use { it.readBytes().decodeToString() })
+    val asset = (rel as kotlinx.serialization.json.JsonObject)["assets"]!!.let { it as kotlinx.serialization.json.JsonArray }
+        .map { it as kotlinx.serialization.json.JsonObject }
+        .firstOrNull { (it["name"] as? kotlinx.serialization.json.JsonPrimitive)?.content == "servercontrol-agent.tar.gz" }
+        ?: throw Exception("Release v$APP_VERSION enthält kein Agent-Paket")
+    val url = (asset["browser_download_url"] as kotlinx.serialization.json.JsonPrimitive).content
+    val digest = (asset["digest"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.removePrefix("sha256:")
+        ?: throw Exception("Release ohne Prüfsumme")
+    val conn = get(url, "application/octet-stream")
+    if (conn.responseCode != 200) throw Exception("Download fehlgeschlagen (HTTP ${conn.responseCode})")
+    val data = conn.inputStream.use { it.readBytes() }
+    val sum = java.security.MessageDigest.getInstance("SHA-256").digest(data).joinToString("") { "%02x".format(it) }
+    if (!sum.equals(digest, ignoreCase = true)) throw Exception("Prüfsumme des Agent-Pakets stimmt nicht")
+    return data
+}
+

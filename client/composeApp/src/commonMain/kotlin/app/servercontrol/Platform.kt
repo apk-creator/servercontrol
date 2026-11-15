@@ -62,8 +62,11 @@ expect suspend fun sshSudoScript(
 
 expect suspend fun tcpReachable(host: String, port: Int, timeoutMs: Int): Boolean
 
-/** agent package built with this app version (servercontrol-agent.tar.gz), null in development builds */
-expect fun bundledAgentPackage(): ByteArray?
+/** agent package of this app version (servercontrol-agent.tar.gz): bundled (desktop) or from the GitHub release */
+expect suspend fun agentPackage(): ByteArray
+
+/** GitHub repository with the releases */
+const val APP_REPO = "apk-creator/servercontrol"
 
 /** Single secret input (API key, repository password, token) – autofill-capable like [CredentialFields]. */
 @Composable

@@ -41,53 +41,49 @@ fun UpdatesScreen(state: AppState, api: ApiClient) {
     val modules = state.session?.modules.orEmpty()
     LaunchedEffect(Unit) { if (state.updateReport == null) state.checkUpdates() }
     val recheck = { state.checkUpdates() }
-    LazyColumn(Modifier.fillMaxSize()) {
-        item {
-            ListHeader(
-                when {
-                    state.updatesChecking -> "Prüfe auf Updates (inkl. Paketlisten des Servers) …"
-                    r != null -> "Zuletzt geprüft um ${formatClock(r.checkedAt)}" + if (r.summary.isEmpty()) " · alles aktuell" else ""
-                    else -> ""
-                },
-            ) { RefreshButton { state.checkUpdates(refreshLists = true) } }
-            if (state.updatesChecking) LinearProgressIndicator(Modifier.fillMaxWidth())
-        }
-        if (r == null) return@LazyColumn
-        if (r.errors.isNotEmpty()) item {
-            SectionCard("Prüfung unvollständig") {
-                r.errors.forEachIndexed { i, e -> Text(e, Modifier.fillMaxWidth().background(stripe(i)).padding(4.dp), color = StatusWarn, fontSize = TextSmall) }
-            }
-        }
-        item { AppUpdateCard(state, r) }
-        item { AgentUpdateCard(state, api, r, host) { confirm = it } }
-        if (modules["nextcloud"] == true) item { NextcloudUpdateCard(r, host, recheck) { confirm = it } }
-        if (modules["immich"] == true) item { ImmichUpdateCard(r, host, recheck) { confirm = it } }
-        val sys = r.system
-        item {
-            SectionCard("Server") {
-                if (sys == null) {
-                    Text("Nicht verfügbar.", fontSize = TextSmall)
-                    return@SectionCard
+    Column(Modifier.fillMaxSize()) {
+        ListHeader(
+            when {
+                state.updatesChecking -> "Prüfe auf Updates (inkl. Paketlisten des Servers) …"
+                r != null -> "Zuletzt geprüft um ${formatClock(r.checkedAt)}" + if (r.summary.isEmpty()) " · alles aktuell" else ""
+                else -> ""
+            },
+        ) { RefreshButton { state.checkUpdates(refreshLists = true) } }
+        if (state.updatesChecking) LinearProgressIndicator(Modifier.fillMaxWidth())
+        if (r != null) CardColumn("cards.updates", Modifier.weight(1f)) {
+            if (r.errors.isNotEmpty()) card("Prüfung") {
+                SectionCard("Prüfung unvollständig") {
+                    r.errors.forEachIndexed { i, e -> Text(e, Modifier.fillMaxWidth().background(stripe(i)).padding(4.dp), color = StatusWarn, fontSize = TextSmall) }
                 }
-                if (sys.packages.isEmpty()) Text("System ist aktuell.", color = StatusOk)
-                else Text("${sys.packages.size} Updates verfügbar (${r.securityCount} Sicherheit)", fontWeight = Bold, color = StatusWarn)
-                if (sys.rebootRequired) Text("Neustart erforderlich.", color = StatusWarn)
-                ButtonRow {
-                    if (sys.packages.isNotEmpty()) {
-                        SmallButton("Installieren", { confirm = Confirm("Updates installieren?", "apt-get upgrade für ${sys.packages.size} Pakete.") { host.post("Upgrade", "/api/system/updates/upgrade", after = recheck) } })
-                        SmallButton("Full-Upgrade", { confirm = Confirm("Full-Upgrade ausführen?", "apt-get full-upgrade kann auch Pakete entfernen oder neu installieren.") { host.post("Full-Upgrade", "/api/system/updates/upgrade?mode=full", after = recheck) } })
+            }
+            card("App") { AppUpdateCard(state, r) }
+            card("Agent") { AgentUpdateCard(state, api, r, host) { confirm = it } }
+            if (modules["nextcloud"] == true) card("Nextcloud") { NextcloudUpdateCard(r, host, recheck) { confirm = it } }
+            if (modules["immich"] == true) card("Immich") { ImmichUpdateCard(r, host, recheck) { confirm = it } }
+            val sys = r.system
+            card("Server") {
+                SectionCard("Server") {
+                    if (sys == null) {
+                        Text("Nicht verfügbar.", fontSize = TextSmall)
+                        return@SectionCard
+                    }
+                    if (sys.packages.isEmpty()) Text("System ist aktuell.", color = StatusOk)
+                    else Text("${sys.packages.size} Updates verfügbar (${r.securityCount} Sicherheit)", fontWeight = Bold, color = StatusWarn)
+                    if (sys.rebootRequired) Text("Neustart erforderlich.", color = StatusWarn)
+                    ButtonRow {
+                        if (sys.packages.isNotEmpty()) {
+                            SmallButton("Installieren", { confirm = Confirm("Updates installieren?", "apt-get upgrade für ${sys.packages.size} Pakete.") { host.post("Upgrade", "/api/system/updates/upgrade", after = recheck) } })
+                            SmallButton("Full-Upgrade", { confirm = Confirm("Full-Upgrade ausführen?", "apt-get full-upgrade kann auch Pakete entfernen oder neu installieren.") { host.post("Full-Upgrade", "/api/system/updates/upgrade?mode=full", after = recheck) } })
+                        }
+                    }
+                    sys.packages.forEachIndexed { i, p ->
+                        StripedItem(
+                            i,
+                            headline = { Text(p.Name, color = if (p.Security) StatusBad else MaterialTheme.colorScheme.onSurface) },
+                            supporting = { Text("${p.OldVersion} → ${p.NewVersion}\n${p.Origin}", fontSize = TextSmall) },
+                        )
                     }
                 }
-            }
-        }
-        if (sys != null && app.servercontrol.ui.CardState.collapsed["Server"] != true) {
-            itemsIndexed(sys.packages) { i, p ->
-                StripedItem(
-                    i,
-                    headline = { Text(p.Name, color = if (p.Security) StatusBad else MaterialTheme.colorScheme.onSurface) },
-                    supporting = { Text("${p.OldVersion} → ${p.NewVersion}\n${p.Origin}", fontSize = TextSmall) },
-                    modifier = Modifier.padding(horizontal = 8.dp),
-                )
             }
         }
     }
@@ -169,12 +165,14 @@ private fun NextcloudUpdateCard(r: UpdateReport, host: ActionHost, recheck: () -
         }
         val server = r.ncServer
         val apps = u["apps"].arr
+        val installed = u["installed"].str
+        if (installed.isNotBlank()) KeyValues("Installiert" to installed, "Neueste" to (server ?: installed))
         if (server == null && apps.isEmpty()) {
             val out = u["stderr"].str.ifBlank { u["stdout"].str }.trim()
             Text(if (u["exitCode"].long == 0L || out.isBlank()) "Nextcloud und Apps sind aktuell." else out, color = if (u["exitCode"].long == 0L) StatusOk else StatusWarn)
         }
         if (server != null) {
-            Text("Nextcloud $server ist verfügbar.", fontWeight = Bold, color = StatusWarn)
+            if (installed.isBlank()) Text("Nextcloud $server ist verfügbar.", fontWeight = Bold, color = StatusWarn)
             if (u["updaterAvailable"].bool == true) {
                 Button(onClick = {
                     ask(Confirm("Nextcloud auf $server aktualisieren?",

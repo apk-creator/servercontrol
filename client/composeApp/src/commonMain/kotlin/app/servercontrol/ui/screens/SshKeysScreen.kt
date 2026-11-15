@@ -43,7 +43,7 @@ import kotlinx.serialization.json.put
  * and register the public key in ~/.ssh/authorized_keys on the server via the agent.
  */
 @Composable
-fun SshKeysScreen(state: AppState, session: Session) {
+fun SshKeysScreen(state: AppState, session: Session, top: app.servercontrol.ui.CardListScope.() -> Unit = {}) {
     val api = session.api
     val profile = session.profile
     val scope = rememberCoroutineScope()
@@ -60,6 +60,7 @@ fun SshKeysScreen(state: AppState, session: Session) {
     var addKey by remember { mutableStateOf(false) }
     var importKey by remember { mutableStateOf(false) }
     var genError by remember { mutableStateOf<String?>(null) }
+    var exportAsk by remember { mutableStateOf(false) }
 
     fun register(key: String) {
         val u = user.trim()
@@ -72,13 +73,15 @@ fun SshKeysScreen(state: AppState, session: Session) {
         })
     }
 
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+    app.servercontrol.ui.CardColumn("cards.terminal") {
+        top()
         // ---------- key of this device ----------
-        SectionCard("Schlüssel dieses Geräts") {
+        card("Schlüssel dieses Geräts") { SectionCard("Schlüssel dieses Geräts", actions = {
+            if (session.profile.sshPrivateKey.isNotBlank()) GearMenu(listOf("Privaten Schlüssel exportieren …" to { exportAsk = true }))
+        }) {
             val p = session.profile
             if (p.sshPrivateKey.isBlank()) {
-                Text("Noch kein Schlüssel. Erzeuge hier einen eigenen Schlüssel für dieses Gerät – " +
-                    "der private Teil bleibt verschlüsselt in der App, nur der öffentliche kommt auf den Server.", fontSize = TextSmall)
+                Text("Noch kein Schlüssel.", fontSize = TextSmall)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     SshKeyAlgo.entries.forEach { a ->
                         FilterPill(algo == a, {
@@ -133,10 +136,10 @@ fun SshKeysScreen(state: AppState, session: Session) {
                     })
                 }
             }
-        }
+        } }
 
         // ---------- keys on the server ----------
-        SectionCard("Eingetragene Schlüssel auf dem Server") {
+        card("Eingetragene Schlüssel auf dem Server") { SectionCard("Eingetragene Schlüssel auf dem Server") {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(user, { user = it.trim() }, Modifier.weight(1f), label = { Text("SSH-Benutzer") }, singleLine = true)
                 Spacer(Modifier.width(8.dp))
@@ -190,12 +193,7 @@ fun SshKeysScreen(state: AppState, session: Session) {
                     }
                 }
             }
-        }
-
-        SectionCard("Hinweis") {
-            Text("Erzeuge für jedes Gerät einen eigenen Schlüssel und trage ihn ein. Die Passwort-Anmeldung erst abschalten, " +
-                "wenn sich alle Geräte per Schlüssel anmelden – und dabei eine zweite Sitzung offen lassen.", fontSize = TextSmall)
-        }
+        } }
     }
 
     if (addKey) {
@@ -239,6 +237,21 @@ fun SshKeysScreen(state: AppState, session: Session) {
             dismissButton = { TextButton(onClick = { importKey = false }) { Text("Abbrechen") } },
         )
     }
+    if (exportAsk) AppDialog(
+        onDismissRequest = { exportAsk = false },
+        title = { Text("Privaten Schlüssel exportieren?") },
+        text = {
+            Text("Der private Schlüssel wird in die Zwischenablage kopiert. Wer ihn hat, kann sich als du per SSH anmelden. " +
+                "Füge ihn nur in einen Passwortmanager ein und leere danach die Zwischenablage.", fontSize = TextSmall)
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                clipboard.setText(AnnotatedString(session.profile.sshPrivateKey))
+                exportAsk = false
+            }) { Text("Kopieren") }
+        },
+        dismissButton = { TextButton(onClick = { exportAsk = false }) { Text("Abbrechen") } },
+    )
     ConfirmDialog(confirm) { confirm = null }
     ActionResultDialog(host, api)
 }

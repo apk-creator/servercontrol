@@ -40,6 +40,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import app.servercontrol.AppState
 import app.servercontrol.ui.AppDialog
+import app.servercontrol.ui.SectionCard
 import app.servercontrol.SecretField
 import app.servercontrol.Section
 import app.servercontrol.Session
@@ -65,7 +66,10 @@ fun TerminalScreen(state: AppState, session: Session) {
     if (term != null && term.connected) {
         TerminalRunning(state)
     } else {
-        SshConnectForm(state, session)
+        // not connected: connection card + the SSH key cards (former "SSH-Schlüssel" menu)
+        SshKeysScreen(state, session) {
+            card("Verbindung") { SshConnectForm(state, session) }
+        }
     }
 }
 
@@ -144,12 +148,8 @@ private fun SshConnectForm(state: AppState, session: Session) {
         }
     }
 
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
-        Column(
-            Modifier.widthIn(max = 520.dp).padding(20.dp).verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Text("SSH-Terminal", style = MaterialTheme.typography.titleLarge)
+    SectionCard("Verbindung") {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             if (state.terminal != null && state.terminal?.connected == false) {
                 Text("Die letzte Sitzung wurde beendet.", style = MaterialTheme.typography.bodySmall)
             }
@@ -159,8 +159,7 @@ private fun SshConnectForm(state: AppState, session: Session) {
             }
             OutlinedTextField(user, { user = it.trim() }, Modifier.fillMaxWidth(), label = { Text("Benutzer") }, singleLine = true)
             if (!hasKey) {
-                Text("Die Anmeldung erfolgt per SSH-Schlüssel. Für dieses Gerät ist noch keiner hinterlegt.", color = MaterialTheme.colorScheme.error)
-                Button(onClick = { state.navigate(Section.SSH_KEYS) }, modifier = Modifier.fillMaxWidth()) { Text("Zu den SSH-Schlüsseln") }
+                Text("Für dieses Gerät ist noch kein SSH-Schlüssel hinterlegt – unter „Schlüssel dieses Geräts“ anlegen.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
             } else {
                 Text(
                     "Anmeldung mit dem Schlüssel dieses Geräts" +

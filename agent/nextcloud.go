@@ -75,9 +75,17 @@ func (s *Server) handleNcUpdateCheck(w http.ResponseWriter, r *http.Request) {
 	for _, m := range ncAppUpdRe.FindAllStringSubmatch(res.Stdout, -1) {
 		apps = append(apps, map[string]string{"app": m[1], "version": m[2]})
 	}
+	installed := ""
+	st := s.occ(r, 60*time.Second, nil, "status", "--output=json")
+	var sj struct {
+		Version string `json:"versionstring"`
+	}
+	if json.Unmarshal([]byte(st.Stdout), &sj) == nil {
+		installed = sj.Version
+	}
 	writeJSON(w, 200, map[string]any{
 		"cmd": res.Cmd, "exitCode": res.ExitCode, "stdout": res.Stdout, "stderr": res.Stderr,
-		"server": server, "apps": apps, "updaterAvailable": s.ncUpdater() != nil,
+		"server": server, "apps": apps, "updaterAvailable": s.ncUpdater() != nil, "installed": installed,
 	})
 }
 

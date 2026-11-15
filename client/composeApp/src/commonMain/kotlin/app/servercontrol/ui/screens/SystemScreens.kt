@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Bedtime
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.ui.graphics.Color
 import kotlin.math.roundToInt
@@ -37,6 +38,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.servercontrol.Bold
+import app.servercontrol.BackHandler
 import app.servercontrol.ButtonRow
 import app.servercontrol.Section
 import app.servercontrol.SmallButton
@@ -66,7 +68,7 @@ private fun tempColor(max: Double) = when { max >= 85 -> StatusBad; max >= 70 ->
 private fun tempLine(t: TempStats) = "min ${c(t.min)} · Ø ${c(t.avg)} · max ${c(t.max)} °C"
 
 @Composable
-fun OverviewScreen(api: ApiClient, goTo: (Section) -> Unit) {
+fun OverviewScreen(api: ApiClient, goTo: (String) -> Unit) {
     var ov by remember { mutableStateOf<Overview?>(null) }
     var hist by remember { mutableStateOf<MetricHistory?>(null) }
     var err by remember { mutableStateOf<String?>(null) }
@@ -79,20 +81,29 @@ fun OverviewScreen(api: ApiClient, goTo: (Section) -> Unit) {
             delay(5_000)
         }
     }
+    var drives by remember { mutableStateOf<JsonElement?>(null) }
     LaunchedEffect(api) {
         while (true) {
             runCatching { hist = api.get("/api/system/history") }
+            runCatching { drives = api.getJson("/api/storage/drives") }
             delay(30_000)
         }
     }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        // restart / shut down: two big fields at the very top
-        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    val o0 = ov
+    if (o0 == null) {
+        Column {
+            err?.let { ErrorCard(it) }
+            LinearProgressIndicator(Modifier.fillMaxWidth())
+        }
+    } else CardColumn("cards.overview") {
+        val o = o0
+        // restart / shut down: two big fields
+        card("Energie") { Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             PowerTile("Neustart", Icons.Default.RestartAlt, Modifier.weight(1f)) { power = "reboot" }
             PowerTile("Herunterfahren", Icons.Default.PowerSettingsNew, Modifier.weight(1f)) { power = "poweroff" }
-        }
+        } }
+        card("Status") { Column {
         err?.let { ErrorCard(it) }
-        val o = ov ?: run { LinearProgressIndicator(Modifier.fillMaxWidth()); return@Column }
         o.scheduledPower?.takeIf { it.at > 0 }?.let { sp ->
             SectionCard(collapsible = false) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -105,10 +116,11 @@ fun OverviewScreen(api: ApiClient, goTo: (Section) -> Unit) {
             SectionCard("Hinweise") {
                 var h = 0
                 if (o.rebootRequired) KeyValue("Neustart", "erforderlich (nach Updates)", h++, StatusWarn)
-                if (o.failedUnits > 0) KeyValue("Dienste", "${o.failedUnits} fehlgeschlagen – anzeigen", h++, StatusBad) { goTo(Section.SERVICES) }
+                if (o.failedUnits > 0) KeyValue("Dienste", "${o.failedUnits} fehlgeschlagen – anzeigen", h++, StatusBad) { goTo(app.servercontrol.SystemTab.SERVICES) }
             }
         }
-        SectionCard("System") {
+        } }
+        card("System") { SectionCard("System") {
             var i = 0
             KeyValue("Hostname", o.hostname, i++)
             KeyValue("Betriebssystem", o.os, i++)
@@ -126,7 +138,8 @@ fun OverviewScreen(api: ApiClient, goTo: (Section) -> Unit) {
                 KeyValue("HDDs", v, i++, if (o.tempDisks.count > 0) tempColor(o.tempDisks.max) else Color.Unspecified) { popup = "hdd" }
             }
         }
-        SectionCard("Auslastung") {
+        }
+        card("Auslastung") { SectionCard("Auslastung") {
             var n = 0
             Column(Modifier.clickable { popup = "cores" }) {
                 UsageBar("CPU  ›", (o.cpuPercent * 10).toLong(), 1000, "${(o.cpuPercent * 10).roundToInt() / 10.0} %", n++)
@@ -140,26 +153,28 @@ fun OverviewScreen(api: ApiClient, goTo: (Section) -> Unit) {
             UsageBar("Festplatten-I/O", (o.disk.busy * 10).toLong(), 1000,
                 "${o.disk.busy.roundToInt()} % · ↓ ${formatBytes(o.disk.read.toLong())}/s ↑ ${formatBytes(o.disk.write.toLong())}/s", n++)
         }
-        if (o.filesystems.isNotEmpty()) SectionCard("Festplatten") {
-            o.filesystems.forEachIndexed { i, m ->
-                UsageBar(m.mount, m.used, m.total, "${formatBytes(m.used)} / ${formatBytes(m.total)}", i)
+        }
+        card("Laufwerke") { drives?.takeIf { it.arr.isNotEmpty() }?.let { list ->
+            SectionCard("Laufwerke") {
+                list.arr.forEachIndexed { i, e -> DriveRow(e, i, compact = true) { goTo(app.servercontrol.SystemTab.STORAGE) } }
             }
         }
-        hist?.let { h ->
+        }
+        card("Verlauf") { hist?.let { h ->
             val pts = h.points
-            val cap = 3600 / h.intervalSeconds.coerceAtLeast(1)
-            val strong = MaterialTheme.colorScheme.onSurface
-            val weak = MaterialTheme.colorScheme.outline
-            SectionCard("Verlauf (1 Stunde)") {
-                ChartBlock("CPU", "${o.cpuPercent.roundToInt()} %", listOf(ChartSeries(pts.map { it.cpu }, strong, fill = true)), cap, 100.0, 0)
-                ChartBlock("Arbeitsspeicher", "${pts.lastOrNull()?.mem?.roundToInt() ?: 0} %", listOf(ChartSeries(pts.map { it.mem }, strong, fill = true)), cap, 100.0, 1)
-                ChartBlock("Festplatten  (lesen ━ / schreiben ━ grau)", "↓ ${formatBytes(o.disk.read.toLong())}/s  ↑ ${formatBytes(o.disk.write.toLong())}/s",
-                    listOf(ChartSeries(pts.map { it.diskRead }, strong), ChartSeries(pts.map { it.diskWrite }, weak)), cap, index = 2)
-                ChartBlock("Netzwerk  (empfangen ━ / senden ━ grau)", "↓ ${formatBytes(o.net.rx.toLong())}/s  ↑ ${formatBytes(o.net.tx.toLong())}/s",
-                    listOf(ChartSeries(pts.map { it.netRx }, strong), ChartSeries(pts.map { it.netTx }, weak)), cap, index = 3)
+            val cap = pts.size.coerceAtLeast(2)
+            val pct = { v: Double -> "${v.roundToInt()} %" }
+            val rate = { v: Double -> "${formatBytes(v.toLong())}/s" }
+            val span = if (h.spanSeconds > 0) formatDuration(h.spanSeconds.toLong()) else ""
+            SectionCard("Verlauf" + if (span.isNotBlank()) " (letzte $span)" else "", stateKey = "Verlauf") {
+                ChartBlock("CPU", "${o.cpuPercent.roundToInt()} %", listOf(ChartSeries(pts.map { it.cpu }, ChartCpu, fill = true)), cap, index = 0, scale = pct)
+                ChartBlock("Arbeitsspeicher", "${pts.lastOrNull()?.mem?.roundToInt() ?: 0} %", listOf(ChartSeries(pts.map { it.mem }, ChartMem, fill = true)), cap, index = 1, scale = pct)
+                ChartBlock("Festplatten  (lesen / schreiben)", "↓ ${formatBytes(o.disk.read.toLong())}/s  ↑ ${formatBytes(o.disk.write.toLong())}/s",
+                    listOf(ChartSeries(pts.map { it.diskRead }, ChartIn, fill = true), ChartSeries(pts.map { it.diskWrite }, ChartOut, fill = true)), cap, index = 2, scale = rate)
+                ChartBlock("Netzwerk  (empfangen / senden)", "↓ ${formatBytes(o.net.rx.toLong())}/s  ↑ ${formatBytes(o.net.tx.toLong())}/s",
+                    listOf(ChartSeries(pts.map { it.netRx }, ChartNetIn, fill = true), ChartSeries(pts.map { it.netTx }, ChartOut, fill = true)), cap, index = 3, scale = rate)
             }
-        }
-        Spacer(Modifier.heightIn(min = 24.dp))
+        } }
     }
     val o = ov
     when (popup) {
@@ -194,7 +209,6 @@ fun OverviewScreen(api: ApiClient, goTo: (Section) -> Unit) {
             title = { Text("Temperaturen HDDs") },
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
-                    Text("Schlafende Platten werden nicht geweckt; für sie gilt der letzte gemessene Wert.", fontSize = TextSmall)
                     Spacer(Modifier.heightIn(min = 6.dp))
                     o.hddTemps.forEachIndexed { i, t ->
                         KeyValue("${t.device.removePrefix("/dev/")} · ${t.model}",
@@ -396,8 +410,9 @@ fun LogsScreen(api: ApiClient) {
         }
         Loader(query to tick, { api.get<List<LogEntry>>("/api/system/logs?$query") }) { entries, _ ->
             if (entries.isEmpty()) Text("Keine Einträge.", Modifier.padding(16.dp))
-            LazyColumn(Modifier.fillMaxSize().padding(horizontal = 8.dp), reverseLayout = true) {
-                itemsIndexed(entries.reversed()) { i, e ->
+            // newest entries on top
+            LazyColumn(Modifier.fillMaxSize().padding(horizontal = 8.dp)) {
+                itemsIndexed(entries.sortedByDescending { it.time }) { i, e ->
                     val color = when (e.priority.toIntOrNull() ?: 6) { in 0..3 -> StatusBad; 4 -> StatusWarn; else -> MaterialTheme.colorScheme.onSurface }
                     Text(
                         "${formatTime(e.time)}  ${e.ident.ifBlank { e.unit }}: ${e.message}",
@@ -439,86 +454,256 @@ expect fun currentUtcOffsetMs(): Long
 
 @Composable
 fun StorageScreen(api: ApiClient) {
-    var smartDev by remember { mutableStateOf<String?>(null) }
-    val host = rememberActionHost { api }
-    Loader(Unit, { api.getJson("/api/system/storage") }) { data, reload ->
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-            SectionCard("Dateisysteme", actions = { RefreshButton(reload) }) {
-                AppJson.decodeFromJsonElement<List<MountInfo>>(data["mounts"] ?: kotlinx.serialization.json.JsonArray(emptyList())).forEachIndexed { i, m ->
-                    UsageBar("${m.mount}  (${m.fstype}) · ${m.device}", m.used, m.total, "${formatBytes(m.used)} / ${formatBytes(m.total)} · frei ${formatBytes(m.free)}", i)
+    var detail by remember { mutableStateOf<String?>(null) }
+    val d = detail
+    if (d != null) {
+        BackHandler { detail = null }
+        DriveDetailScreen(api, d) { detail = null }
+        return
+    }
+    var tick by remember { mutableStateOf(0) }
+    CardColumn("cards.storage") {
+        card("Laufwerke") {
+            SectionCard("Laufwerke", actions = { RefreshButton { tick++ } }) {
+                Loader(tick, { api.getJson("/api/storage/drives") }) { list, _ ->
+                    if (list.arr.isEmpty()) Text("Keine Laufwerke gefunden.", fontSize = TextSmall)
+                    list.arr.forEachIndexed { i, e -> DriveRow(e, i) { detail = e["device"].str } }
                 }
             }
-            SectionCard("Laufwerke") {
-                data["blockdevices"]["blockdevices"].arr.filter { it["type"].str == "disk" && !it["name"].str.startsWith("zram") }.forEachIndexed { i, d ->
-                    val ds = data["diskStates"][d["path"].str]
-                    Column(Modifier.fillMaxWidth().background(stripe(i)).clickable { smartDev = d["path"].str }.padding(6.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("${d["path"].str}  ·  ${formatBytes(d["size"].long)}", Modifier.weight(1f), fontWeight = Bold)
-                            if (ds != null) {
-                                val standby = ds["standby"].bool == true
-                                Text(if (standby) "Standby" else "aktiv", fontSize = TextSmall,
-                                    color = if (standby) MaterialTheme.colorScheme.onSurfaceVariant else StatusOk)
-                                Spacer(Modifier.width(10.dp))
-                                val passed = ds["smartPassed"].bool
-                                Text(when (passed) { true -> "SMART OK"; false -> "SMART FEHLER"; null -> "SMART ?" }, fontSize = TextSmall, fontWeight = Bold,
-                                    color = when (passed) { true -> StatusOk; false -> StatusBad; null -> StatusWarn })
+        }
+        card("Auto-Standby") { StandbyCard(api) }
+    }
+}
+
+/** "/dev/sda · 4.0 TB · aktiv", SMART (grey = last known), usage bar of the mounted filesystems */
+@Composable
+fun DriveRow(e: JsonElement, i: Int, compact: Boolean = false, onClick: () -> Unit) {
+    val state = e["state"].str
+    val passed = e["smartPassed"].bool
+    val cached = e["smartCached"].bool == true
+    val used = e["used"].long ?: 0
+    val total = e["total"].long ?: 0
+    val grey = MaterialTheme.colorScheme.onSurfaceVariant
+    Column(Modifier.fillMaxWidth().background(stripe(i)).clickable(onClick = onClick).padding(horizontal = 4.dp, vertical = 4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "${e["device"].str} • ${formatBytes(e["size"].long)} • ${stateLabel(state)}" + if (compact && total > 0) " • ${used * 100 / total} %" else "",
+                Modifier.weight(1f), maxLines = 1,
+                color = if (state == "active") StatusOk else MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                when (passed) { true -> "SMART OK"; false -> "SMART FEHLER"; null -> "SMART –" },
+                fontSize = TextSmall,
+                color = when {
+                    passed == false -> StatusBad
+                    cached || passed == null -> grey
+                    else -> StatusOk
+                },
+            )
+        }
+        if (!compact) {
+            Text(listOf(e["model"].str, e["mounts"].arr.joinToString { it.str }).filter { it.isNotBlank() }.joinToString(" · "), fontSize = TextSmall, color = grey, maxLines = 1)
+            if (total > 0) UsageBar("", used, total, "${formatBytes(used)} / ${formatBytes(total)} · ${used * 100 / total} %", -1)
+        }
+    }
+}
+
+private fun stateLabel(s: String) = when (s) { "active" -> "aktiv"; "standby" -> "Standby"; "idle" -> "idle"; else -> s }
+
+// ---------------- drive detail ----------------
+
+@Composable
+private fun DriveDetailScreen(api: ApiClient, dev: String, onClose: () -> Unit) {
+    val host = rememberActionHost { api }
+    var tick by remember { mutableStateOf(0) }
+    var smart by remember { mutableStateOf(false) }
+    var dialog by remember { mutableStateOf<Pair<String, JsonElement>?>(null) } // action to partition/disk
+    val reload: () -> Unit = { tick++ }
+    Loader(tick, { api.getJson("/api/storage/drive?device=${enc(dev)}") }) { d, _ ->
+        CardColumn("cards.drive") {
+            card("Laufwerk") {
+                SectionCard(dev, stateKey = "drive.info", actions = { RefreshButton(reload) }) {
+                    var i = 0
+                    KeyValue("Modell", d["model"].str.ifBlank { "–" }, i++)
+                    KeyValue("Seriennummer", d["serial"].str.ifBlank { "–" }, i++)
+                    KeyValue("Größe", formatBytes(d["size"].long), i++)
+                    KeyValue("Anschluss", (d["tran"].str.ifBlank { "–" }) + if (d["rotational"].bool == true) " · HDD" else " · SSD", i++)
+                    KeyValue("Zustand", stateLabel(d["state"].str), i++, if (d["state"].str == "active") StatusOk else Color.Unspecified)
+                    val passed = d["smartPassed"].bool
+                    KeyValue("SMART", when (passed) { true -> "OK"; false -> "FEHLER"; null -> "unbekannt" } + if (d["smartCached"].bool == true) " (zuletzt bekannt)" else "", i++,
+                        when { passed == false -> StatusBad; d["smartCached"].bool == true || passed == null -> MaterialTheme.colorScheme.onSurfaceVariant; else -> StatusOk }) { smart = true }
+                    if ((d["celsius"].long ?: 0) > 0) KeyValue("Temperatur", "${d["celsius"].long} °C", i++)
+                    KeyValue("Partitionstabelle", d["pttype"].str.ifBlank { "keine" }, i++)
+                    val total = d["total"].long ?: 0
+                    if (total > 0) UsageBar("Belegt", d["used"].long ?: 0, total, "${formatBytes(d["used"].long)} / ${formatBytes(total)}", i++)
+                    if (d["system"].bool == true) Text("Enthält das laufende System – Formatieren und Partitionieren sind gesperrt.", color = StatusWarn, fontSize = TextSmall)
+                }
+            }
+            card("Partitionen") {
+                SectionCard("Partitionen und Dateisysteme", stateKey = "drive.parts", actions = {
+                    if (d["system"].bool != true) GearMenu(listOf(
+                        "Neue Partitionstabelle …" to { dialog = "mklabel" to d },
+                    ))
+                }) {
+                    val parts = d["partitions"].arr
+                    if (parts.isEmpty()) Text("Keine Partitionen.", fontSize = TextSmall)
+                    parts.forEachIndexed { i, p ->
+                        val mounts = p["mounts"].arr.map { it.str }
+                        Row(Modifier.fillMaxWidth().background(stripe(i)).padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f).padding(vertical = 4.dp)) {
+                                Text("${p["path"].str} • ${formatBytes(p["size"].long)} • ${p["fstype"].str.ifBlank { "kein Dateisystem" }}", maxLines = 1)
+                                Text(listOfNotNull(
+                                    p["label"].str.takeIf { it.isNotBlank() }?.let { "„$it“" },
+                                    mounts.takeIf { it.isNotEmpty() }?.joinToString()?.let { "eingehängt: $it" } ?: "nicht eingehängt",
+                                    p["fstab"]["mount"].str.takeIf { it.isNotBlank() }?.let { "fstab: $it" },
+                                ).joinToString(" · "), fontSize = TextSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                val fsSize = p["fssize"].long ?: 0
+                                if (fsSize > 0) UsageBar("", p["fsused"].long ?: 0, fsSize, "${formatBytes(p["fsused"].long)} / ${formatBytes(fsSize)}", -1)
                             }
+                            val sys = p["system"].bool == true
+                            val hasFs = p["fstype"].str.isNotBlank()
+                            GearMenu(buildList {
+                                if (hasFs && mounts.isEmpty()) add("Einhängen …" to { dialog = "mount" to p })
+                                if (mounts.isNotEmpty() && !sys) add("Aushängen" to { dialog = "unmount" to p })
+                                if (hasFs) add("Umbenennen …" to { dialog = "label" to p })
+                                if (!sys && mounts.isEmpty()) add("Formatieren …" to { dialog = "format" to p })
+                                if (!sys && mounts.isEmpty() && p["type"].str == "part") add("Partition löschen …" to { dialog = "rmpart" to p })
+                            })
                         }
-                        Text(listOf(d["model"].str, d["tran"].str.uppercase(), if (d["rota"].bool == true) "HDD" else "SSD",
-                            ds["celsius"].str.toDoubleOrNull()?.takeIf { it > 0 }?.let { "${it.roundToInt()} °C" } ?: "")
-                            .filter { it.isNotBlank() }.joinToString(" · "), style = MaterialTheme.typography.bodySmall)
-                        d["children"].arr.forEach { c ->
-                            Text("   └ ${c["name"].str}  ${formatBytes(c["size"].long)}  ${c["fstype"].str}  ${c["mountpoints"].arr.joinToString { it.str }}",
-                                style = MaterialTheme.typography.bodySmall)
+                    }
+                    d["free"].arr.forEachIndexed { i, f ->
+                        val size = (f["end"].long ?: 0) - (f["start"].long ?: 0)
+                        Row(Modifier.fillMaxWidth().background(stripe(parts.size + i)).padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("Freier Bereich • ${formatBytes(size)}", Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            GearMenu(listOf("Partition anlegen …" to { dialog = "mkpart" to f }))
                         }
                     }
                 }
-                Text("Tippe auf ein Laufwerk für SMART-Werte. Platten im Standby werden nicht geweckt; für sie gilt der letzte bekannte SMART-Status.", style = MaterialTheme.typography.bodySmall)
             }
-            StandbyCard(api, host)
+        }
+        dialog?.let { (act, target) -> DriveActionDialog(act, dev, d, target, host, onDone = { dialog = null; reload() }) { dialog = null } }
+    }
+    if (smart) SmartDialog(api, dev) { smart = false }
+    ActionResultDialog(host, api)
+}
+
+/** small gear button with a menu */
+@Composable
+fun GearMenu(items: List<Pair<String, () -> Unit>>) {
+    if (items.isEmpty()) return
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { open = true }) { Icon(Icons.Default.Settings, "Aktionen", Modifier.size(20.dp)) }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            items.forEach { (t, f) -> DropdownMenuItem(text = { Text(t) }, onClick = { open = false; f() }) }
         }
     }
-    smartDev?.let { SmartDialog(api, it) { smartDev = null } }
-    ActionResultDialog(host, api)
+}
+
+@Composable
+private fun DriveActionDialog(act: String, disk: String, d: JsonElement, t: JsonElement, host: ActionHost, onDone: () -> Unit, onDismiss: () -> Unit) {
+    val path = if (act == "mklabel" || act == "mkpart") disk else t["path"].str
+    var label by remember { mutableStateOf(t["label"].str) }
+    var mountpoint by remember { mutableStateOf(t["fstab"]["mount"].str.ifBlank { "/mnt/" + (t["label"].str.ifBlank { t["name"].str }).filter { it.isLetterOrDigit() || it in "._-" } }) }
+    var fstab by remember { mutableStateOf(true) }
+    var fstype by remember { mutableStateOf("ext4") }
+    var table by remember { mutableStateOf("gpt") }
+    var sizeGb by remember { mutableStateOf("") }
+    var confirm by remember { mutableStateOf("") }
+    val destructive = act in setOf("format", "mklabel", "rmpart")
+    val tools = d["tools"]
+    val title = when (act) {
+        "mount" -> "Einhängen"; "unmount" -> "Aushängen"; "label" -> "Umbenennen"; "format" -> "Formatieren"
+        "mklabel" -> "Neue Partitionstabelle"; "mkpart" -> "Partition anlegen"; else -> "Partition löschen"
+    }
+    AppDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("$title – $path") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                when (act) {
+                    "mount" -> {
+                        OutlinedTextField(mountpoint, { mountpoint = it.trim() }, Modifier.fillMaxWidth(), label = { Text("Einhängepunkt") }, singleLine = true)
+                        Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(fstab, { fstab = it }); Text("Beim Start einhängen (fstab, nofail)") }
+                    }
+                    "unmount" -> Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(fstab, { fstab = it }); Text("Auch aus der fstab entfernen") }
+                    "label", "format" -> {
+                        if (act == "format") Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf("ext4", "xfs", "btrfs", "exfat", "vfat", "ntfs").filter { tools["mkfs.$it"].bool == true }.forEach { fs ->
+                                FilterPill(fstype == fs, { fstype = fs }, fs)
+                            }
+                        }
+                        OutlinedTextField(label, { label = it.take(32) }, Modifier.fillMaxWidth(), label = { Text("Name (Label)") }, singleLine = true)
+                    }
+                    "mklabel" -> Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        FilterPill(table == "gpt", { table = "gpt" }, "GPT")
+                        FilterPill(table == "msdos", { table = "msdos" }, "MBR")
+                    }
+                    "mkpart" -> {
+                        val free = (t["end"].long ?: 0) - (t["start"].long ?: 0)
+                        Text("Freier Bereich: ${formatBytes(free)}", fontSize = TextSmall)
+                        OutlinedTextField(sizeGb, { sizeGb = it.filter { c -> c.isDigit() || c == ',' || c == '.' } }, Modifier.fillMaxWidth(),
+                            label = { Text("Größe in GB (leer = ganzer Bereich)") }, singleLine = true)
+                    }
+                }
+                if (destructive) {
+                    Text(
+                        when (act) {
+                            "format" -> "Alle Daten auf $path werden gelöscht."
+                            "mklabel" -> "Alle Partitionen und Daten auf $path werden gelöscht."
+                            else -> "Die Partition $path und ihre Daten werden gelöscht."
+                        } + " Zum Bestätigen „$path“ eingeben:", color = StatusBad,
+                    )
+                    OutlinedTextField(confirm, { confirm = it.trim() }, Modifier.fillMaxWidth(), singleLine = true, placeholder = { Text(path) })
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = !destructive || confirm == path, onClick = {
+                val body = kotlinx.serialization.json.buildJsonObject {
+                    put("action", act); put("path", path)
+                    when (act) {
+                        "mount" -> { put("mountpoint", mountpoint); put("fstab", fstab) }
+                        "unmount" -> put("fstab", fstab)
+                        "label" -> put("label", label)
+                        "format" -> { put("fstype", fstype); put("label", label) }
+                        "mklabel" -> put("table", table)
+                        "mkpart" -> {
+                            put("start", t["start"].long ?: 0)
+                            put("size", ((sizeGb.replace(',', '.').toDoubleOrNull() ?: 0.0) * 1e9).toLong())
+                        }
+                    }
+                    if (destructive) put("confirm", confirm)
+                }.toString()
+                host.post(title, "/api/storage/drive/action", body, after = onDone)
+                onDismiss()
+            }) { Text(title, color = if (destructive) StatusBad else Color.Unspecified) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Abbrechen") } },
+    )
 }
 
 private val standbyTimes = listOf(0 to "nie", 300 to "5 min", 600 to "10 min", 900 to "15 min", 1200 to "20 min", 1800 to "30 min", 3600 to "1 h", 7200 to "2 h")
 
 private fun standbyLabel(s: Int) = standbyTimes.firstOrNull { it.first == s }?.second ?: if (s % 60 == 0) "${s / 60} min" else "$s s"
 
-/** Speicher → Auto-Standby: spin-down times of the HDDs with hdparm or hd-idle */
+/** Speicher → Auto-Standby: spin-down time of every HDD, managed by hd-idle */
 @Composable
-private fun StandbyCard(api: ApiClient, host: ActionHost) {
+private fun StandbyCard(api: ApiClient) {
+    val host = rememberActionHost { api }
     var tick by remember { mutableStateOf(0) }
     SectionCard("Auto-Standby", actions = { RefreshButton { tick++ } }) {
         Loader(tick, { api.getJson("/api/storage/standby") }) { d, _ ->
-            var method by remember(d) { mutableStateOf(d["method"].str) }
             val times = remember(d) {
                 androidx.compose.runtime.mutableStateMapOf<String, Int>().apply {
                     d["disks"].arr.forEach { e -> e["id"].str.takeIf { it.isNotBlank() }?.let { put(it, e["timeout"].long?.toInt() ?: 0) } }
                 }
             }
-            val disable = remember(d) { androidx.compose.runtime.mutableStateListOf<String>() }
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Nach welcher Leerlaufzeit die HDDs schlafen gehen. Zu kurze Zeiten verschleißen Motor und Mechanik; 10–30 Minuten sind ein guter Wert.", fontSize = TextSmall)
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    FilterPill(method == "hdparm", { method = "hdparm" }, "hdparm")
-                    FilterPill(method == "hdidle", { method = "hdidle" }, "hd-idle")
-                    FilterPill(method == "", { method = "" }, "aus")
-                }
-                Text(
-                    when (method) {
-                        "hdparm" -> "hdparm stellt den Timer in der Platte ein (beim Start des Servers neu gesetzt)."
-                        "hdidle" -> "hd-idle überwacht die Zugriffe und schickt die Platten selbst schlafen; der Timer der Platten wird dafür abgeschaltet."
-                        else -> "Keine Verwaltung durch die App; die Timer der Platten werden abgeschaltet."
-                    },
-                    fontSize = TextSmall,
-                )
-                if (method == "hdidle" && d["hdidle"].bool != true) {
+                if (d["hdidle"].bool != true) {
                     Text("hd-idle ist nicht installiert.", color = StatusWarn, fontSize = TextSmall)
                     SmallButton("hd-idle installieren", { host.post("hd-idle installieren", "/api/storage/standby/install-hdidle", after = { tick++ }) })
                 }
-                if (method == "hdparm" && d["hdparm"].bool != true) Text("hdparm ist nicht installiert.", color = StatusWarn, fontSize = TextSmall)
                 val disks = d["disks"].arr
                 if (disks.isEmpty()) Text("Keine HDDs gefunden.", fontSize = TextSmall)
                 disks.forEachIndexed { i, e ->
@@ -526,17 +711,12 @@ private fun StandbyCard(api: ApiClient, host: ActionHost) {
                     val state = e["state"].str
                     var open by remember { mutableStateOf(false) }
                     Row(Modifier.fillMaxWidth().background(stripe(i)).padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f).padding(vertical = 4.dp)) {
-                            Text("${e["device"].str.removePrefix("/dev/")} · ${e["model"].str} · ${formatBytes(e["size"].long)}", maxLines = 1)
-                            Text(
-                                when (state) { "active" -> "aktiv"; "standby", "sleeping" -> "Standby"; else -> "Zustand unbekannt" },
-                                fontSize = TextSmall,
-                                color = if (state == "active") StatusOk else MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            if (id.isBlank()) Text("ohne /dev/disk/by-id – nicht verwaltbar", fontSize = TextSmall, color = StatusWarn)
-                        }
+                        Text(
+                            "${e["device"].str} • ${formatBytes(e["size"].long)} • ${if (state == "active") "aktiv" else if (state == "standby" || state == "sleeping") "Standby" else "–"}",
+                            Modifier.weight(1f), maxLines = 1, color = if (state == "active") StatusOk else MaterialTheme.colorScheme.onSurface,
+                        )
                         if (id.isNotBlank()) Box {
-                            OutlinedButton(onClick = { open = true }, enabled = method.isNotBlank()) { Text(if (method.isBlank()) "–" else standbyLabel(times[id] ?: 0), maxLines = 1) }
+                            TextButton(onClick = { open = true }) { Text(standbyLabel(times[id] ?: 0), maxLines = 1) }
                             DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
                                 standbyTimes.forEach { (v, l) -> DropdownMenuItem(text = { Text(l) }, onClick = { open = false; times[id] = v }) }
                             }
@@ -546,25 +726,18 @@ private fun StandbyCard(api: ApiClient, host: ActionHost) {
                         }
                     }
                 }
-                d["foreignUnits"].arr.filter { it["enabled"].bool == true }.forEach { u ->
-                    val name = u["unit"].str
-                    Text("Eigener Dienst „$name“ setzt ebenfalls Standby-Zeiten und würde die Einstellung hier beim nächsten Start überschreiben.", color = StatusWarn, fontSize = TextSmall)
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(name in disable, { if (it) disable.add(name) else disable.remove(name) })
-                        Text("$name beim Speichern deaktivieren", fontSize = TextSmall)
-                    }
-                }
-                Button(onClick = {
+                if (disks.isNotEmpty()) Button(onClick = {
                     val body = kotlinx.serialization.json.buildJsonObject {
-                        put("method", method)
+                        put("method", "hdidle")
                         put("disks", kotlinx.serialization.json.buildJsonObject { times.forEach { (k, v) -> put(k, v) } })
-                        put("disableUnits", kotlinx.serialization.json.buildJsonArray { disable.forEach { add(kotlinx.serialization.json.JsonPrimitive(it)) } })
+                        put("disableUnits", kotlinx.serialization.json.buildJsonArray { })
                     }.toString()
                     host.run("Auto-Standby", { AppJson.parseToJsonElement(api.putRaw("/api/storage/standby", body))["stdout"].str }, after = { tick++ })
-                }, enabled = method != "hdidle" || d["hdidle"].bool == true) { Text("Speichern") }
+                }, enabled = d["hdidle"].bool == true) { Text("Speichern") }
             }
         }
     }
+    ActionResultDialog(host, api)
 }
 
 @Composable
@@ -736,32 +909,32 @@ fun ProcessesScreen(api: ApiClient) {
 @Composable
 fun AccountsScreen(api: ApiClient) {
     Loader(Unit, { api.getJson("/api/system/accounts") }) { d, reload ->
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-            SectionCard("Benutzerkonten", actions = { RefreshButton(reload) }) {
+        CardColumn("cards.accounts") {
+            card("Benutzerkonten") { SectionCard("Benutzerkonten", actions = { RefreshButton(reload) }) {
                 d["accounts"].arr.forEachIndexed { i, a ->
                     Column(Modifier.fillMaxWidth().background(stripe(i)).padding(4.dp)) {
                         Text("${a["name"].str}  (UID ${a["uid"].str})", fontWeight = Bold)
                         Text("${a["gecos"].str} · ${a["home"].str} · ${a["shell"].str}", style = MaterialTheme.typography.bodySmall)
                     }
                 }
-            }
-            SectionCard("Letzte Anmeldungen") { MonoText(d["lastLogins"].str) }
+            } }
+            card("Letzte Anmeldungen") { SectionCard("Letzte Anmeldungen") { MonoText(d["lastLogins"].str) } }
         }
     }
 }
 
 // ======================= Jobs =======================
 
+/** Aufgaben (former menu) as a card in the Agent section */
 @Composable
-fun JobsScreen(api: ApiClient) {
+fun JobsCard(api: ApiClient) {
     var open by remember { mutableStateOf<JobInfo?>(null) }
-    Loader(open == null, { api.get<List<JobInfo>>("/api/jobs").sortedByDescending { it.started } }) { jobs, reload ->
-        Column {
-            ListHeader("Länger laufende Aktionen, die aus der App auf dem Server gestartet wurden (z. B. apt, Kopia, Nextcloud), mit Ausgabe. " +
-                "Sie bleiben 24 Stunden sichtbar; ein Neustart des Agenten leert die Liste.") { RefreshButton(reload) }
-            if (jobs.isEmpty()) Text("Keine Aufgaben.", Modifier.padding(16.dp))
-            LazyColumn {
-                itemsIndexed(jobs, key = { _, j -> j.id }) { i, j ->
+    var tick by remember { mutableStateOf(0) }
+    SectionCard("Aufgaben", actions = { RefreshButton { tick++ } }) {
+        Loader(tick to (open == null), { api.get<List<JobInfo>>("/api/jobs").sortedByDescending { it.started } }) { jobs, _ ->
+            Column {
+                if (jobs.isEmpty()) Text("Keine Aufgaben.", fontSize = TextSmall)
+                jobs.forEachIndexed { i, j ->
                     StripedItem(
                         i,
                         leading = { StatusDot(when { j.finished == null -> StatusWarn; j.exitCode == 0 -> StatusOk; else -> StatusBad }) },
@@ -785,8 +958,6 @@ fun ShellScreen(api: ApiClient) {
     val host = rememberActionHost { api }
     val history = remember { mutableStateOf(listOf<Pair<String, CmdResult>>()) }
     Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Befehle laufen als root auf dem Server. Nur aktiv, wenn allowShell in der Agent-Konfiguration gesetzt ist.",
-            style = MaterialTheme.typography.bodySmall, color = StatusWarn)
         OutlinedTextField(cmd, { cmd = it }, Modifier.fillMaxWidth(), label = { Text("Befehl") },
             textStyle = LocalTextStyleMono())
         Row(verticalAlignment = Alignment.CenterVertically) {

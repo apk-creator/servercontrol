@@ -30,10 +30,20 @@ sealed interface Screen {
 }
 
 enum class Section(val title: String, val module: String? = null) {
-    OVERVIEW("Übersicht"), TERMINAL("Terminal"), SSH_KEYS("SSH-Schlüssel"), SERVICES("Dienste"), CONTAINERS("Container"), LOGS("Protokolle"),
-    STORAGE("Speicher"), FILES("Dateien"), NETWORK("Netzwerk"), PROCESSES("Prozesse"), UPDATES("Updates"),
+    OVERVIEW("Übersicht"), SYSTEM("System"), TERMINAL("Terminal"), FILES("Dateien"), UPDATES("Updates"),
     ACCOUNTS("Konten"), KOPIA("Kopia"), NEXTCLOUD("Nextcloud"), IMMICH("Immich"),
-    JOBS("Aufgaben"), SHELL("Befehl", "shell"), AGENT("Agent"),
+    SHELL("Befehl", "shell"), AGENT("Agent"),
+}
+
+/** Tabs of the System section */
+object SystemTab {
+    const val SERVICES = "Dienste"
+    const val PROCESSES = "Prozesse"
+    const val CONTAINERS = "Container"
+    const val STORAGE = "Speicher"
+    const val NETWORK = "Netzwerk"
+    const val LOGS = "Protokolle"
+    val all = listOf(SERVICES, PROCESSES, CONTAINERS, STORAGE, NETWORK, LOGS)
 }
 
 class Session(
@@ -76,6 +86,14 @@ class AppState(
         sectionHistory.add(section)
         if (sectionHistory.size > 30) sectionHistory.removeAt(0)
         section = to
+    }
+
+    /** tab to open in the System section (set when jumping there from e.g. the overview) */
+    var systemTab by mutableStateOf<String?>(null)
+
+    fun openSystemTab(tab: String) {
+        systemTab = tab
+        navigate(Section.SYSTEM)
     }
 
     fun back(): Boolean {
@@ -125,6 +143,9 @@ class AppState(
     suspend fun loadVault() {
         val plain = store.load() ?: return
         vault = runCatching { AppJson.decodeFromString<ProfileVault>(plain) }.getOrElse { ProfileVault() }
+        app.servercontrol.ui.UiOrder.orders.clear()
+        app.servercontrol.ui.UiOrder.orders.putAll(vault.uiOrder)
+        app.servercontrol.ui.UiOrder.onChange = { m -> scope.launch { vault = vault.copy(uiOrder = m); persist() } }
         // app (re)started, e.g. after Android ended the process in the background:
         // reconnect to the last server with the remembered device
         if (!autoResumed && session == null && screen == Screen.Profiles) {
@@ -315,7 +336,8 @@ class AppState(
         val log = StringBuilder()
         fun say(t: String) { log.appendLine(t); installLog = log.toString().trim() }
         try {
-            val pkg = bundledAgentPackage() ?: throw Exception("Diese App-Version enthält kein Agent-Paket.")
+            say("Lade Agent $APP_VERSION …")
+            val pkg = agentPackage()
             val (host, _) = hostOf(profile)
             val known = trustedHostKey ?: profile.sshHostKey
             say("Verbinde per SSH mit $sshUser@$host …")

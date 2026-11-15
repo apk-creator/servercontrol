@@ -86,7 +86,6 @@ fun FilesScreen(api: ApiClient) {
     var path by remember { mutableStateOf(FilesState.path) }
     var tick by remember { mutableStateOf(0) }
     var filter by remember { mutableStateOf("") }
-    var hidden by remember { mutableStateOf(false) }
     var addMenu by remember { mutableStateOf(false) }
     var newFolder by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<FileEntry?>(null) }
@@ -121,13 +120,12 @@ fun FilesScreen(api: ApiClient) {
                 Text(part, Modifier.clickable { go(target) }.padding(4.dp), fontWeight = if (i == parts.lastIndex) Bold else null)
                 if (i < parts.lastIndex) Text("/", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Spacer(Modifier.width(12.dp))
-            FilterPill(hidden, { hidden = !hidden }, "Versteckte")
         }
         Loader(path to tick, { api.get<FileList>("/api/files/list?path=${encQuery(path)}") }) { list, _ ->
-            val shown = list.entries.filter { (hidden || !it.name.startsWith(".")) && (filter.isBlank() || it.name.contains(filter, true)) }
+            // hidden files are always shown
+            val shown = list.entries.filter { filter.isBlank() || it.name.contains(filter, true) }
             Column(Modifier.fillMaxSize()) {
-            ListHeader("${shown.size} Einträge" + if (shown.size != list.entries.size) " (${list.entries.size - shown.size} ausgeblendet)" else "")
+            ListHeader("${shown.size} Einträge")
             LazyColumn(Modifier.fillMaxSize()) {
                 itemsIndexed(shown, key = { _, e -> e.name }) { i, e ->
                     StripedItem(
@@ -155,7 +153,8 @@ fun FilesScreen(api: ApiClient) {
                                 fontSize = TextSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
                             )
                         },
-                        trailing = { IconButton(onClick = { selected = e }) { Icon(Icons.Default.Settings, "Aktionen", Modifier.size(20.dp)) } },
+                        // files open their actions with a tap; folders open on tap, so they keep the gear
+                        trailing = if (e.isDir) ({ IconButton(onClick = { selected = e }) { Icon(Icons.Default.Settings, "Aktionen", Modifier.size(20.dp)) } }) else null,
                         onClick = { if (e.isDir) go(join(path, e.name)) else selected = e },
                     )
                 }
