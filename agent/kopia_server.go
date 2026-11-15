@@ -233,22 +233,21 @@ func (s *kopiaSrv) login(ctx context.Context) error {
 	return lastErr
 }
 
-// call runs one UI API request; logs in again once if the session expired.
-func (s *kopiaSrv) call(ctx context.Context, method, path string, body any, out any) error {
+// callRaw runs one UI API request and returns status and body; logs in again once if the session expired.
+func (s *kopiaSrv) callRaw(ctx context.Context, method, pathAndQuery string, body []byte) (int, []byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for attempt := 0; attempt < 2; attempt++ {
 		if s.client == nil {
 			if err := s.login(ctx); err != nil {
-				return err
+				return 0, nil, err
 			}
 		}
 		var rd io.Reader
 		if body != nil {
-			b, _ := json.Marshal(body)
-			rd = strings.NewReader(string(b))
+			rd = strings.NewReader(string(body))
 		}
-		req, _ := http.NewRequestWithContext(ctx, method, s.base+path, rd)
+		req, _ := http.NewRequestWithContext(ctx, method, s.base+pathAndQuery, rd)
 		req.SetBasicAuth(s.User, s.Pass)
 		if s.csrf != "" {
 			req.Header.Set("X-Kopia-Csrf-Token", s.csrf)
@@ -260,7 +259,7 @@ func (s *kopiaSrv) call(ctx context.Context, method, path string, body any, out 
 		if err != nil {
 			s.client = nil
 			if attempt == 1 {
-				return err
+				return 0, nil, err
 			}
 			continue
 		}
@@ -269,16 +268,96 @@ func (s *kopiaSrv) call(ctx context.Context, method, path string, body any, out 
 		if resp.StatusCode == 401 || resp.StatusCode == 403 || (resp.StatusCode == 400 && strings.Contains(string(b), "CSRF")) {
 			s.client = nil // session or token expired
 			if attempt == 1 {
-				return fmt.Errorf("Kopia-Server %s: HTTP %d %s", s.Unit, resp.StatusCode, strings.TrimSpace(string(b)))
+				return resp.StatusCode, b, nil
 			}
 			continue
 		}
-		if resp.StatusCode != 200 {
-			return fmt.Errorf("Kopia-Server %s: HTTP %d %s", s.Unit, resp.StatusCode, strings.TrimSpace(string(b)))
-		}
-		return json.Unmarshal(b, out)
+		return resp.StatusCode, b, nil
 	}
-	return errors.New("Kopia-Server nicht erreichbar")
+	return 0, nil, errors.New("Kopia-Server nicht erreichbar")
+}
+
+// call runs one UI API request and decodes the JSON answer.
+func (s *kopiaSrv) call(ctx context.Context, method, path string, body any, out any) error {
+	var b []byte
+	if body != nil {
+		b, _ = json.Marshal(body)
+	}
+	code, resp, err := s.callRaw(ctx, method, path, b)
+	if err != nil {
+		return err
+	}
+	if code != 200 {
+		return fmt.Errorf("Kopia-Server %s: HTTP %d %s", s.Unit, code, strings.TrimSpace(string(resp)))
+	}
+	return json.Unmarshal(resp, out)
+}
+
+// The app reaches the Kopia server API (what the Kopia web UI uses) through this allowlist.
+var kopiaProxyAllow = []struct {
+	method string
+	re     *regexp.Regexp
+}{
+	{"GET", regexp.MustCompile(`^(sources|snapshots|policies|policy|tasks|tasks-summary|repo/status|repo/algorithms|notificationProfiles|current-user)$`)},
+	{"GET", regexp.MustCompile(`^tasks/[A-Za-z0-9_-]+(/logs)?$`)},
+	{"GET", regexp.MustCompile(`^objects/[A-Za-z0-9]+$`)},
+	{"POST", regexp.MustCompile(`^(policy/resolve|sources|sources/upload|sources/cancel|snapshots/delete|snapshots/edit|repo/description|repo/sync|notificationProfiles|testNotificationProfile|paths/resolve|estimate)$`)},
+	{"POST", regexp.MustCompile(`^tasks/[A-Za-z0-9_-]+/cancel$`)},
+	{"PUT", regexp.MustCompile(`^policy$`)},
+	{"DELETE", regexp.MustCompile(`^policy$`)},
+	{"DELETE", regexp.MustCompile(`^notificationProfiles/[A-Za-z0-9._ -]+$`)},
+}
+
+// ANY /api/kopia/repos/{repo}/srv/{path...} → /api/v1/{path} of the repo's Kopia server
+func (s *Server) handleKopiaProxy(w http.ResponseWriter, r *http.Request) {
+	k, _, ok := s.kopiaRepo(w, r)
+	if !ok {
+		return
+	}
+	p := r.PathValue("path")
+	allowed := false
+	for _, a := range kopiaProxyAllow {
+		if a.method == r.Method && a.re.MatchString(p) {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		writeErr(w, 403, "nicht erlaubt: "+r.Method+" "+p)
+		return
+	}
+	srv := kopiaServerFor(r.Context(), k)
+	if srv == nil {
+		writeErr(w, 503, "Kein laufender Kopia-Server für dieses Repository gefunden")
+		return
+	}
+	var body []byte
+	if r.Method == "POST" || r.Method == "PUT" {
+		body, _ = io.ReadAll(io.LimitReader(r.Body, 4<<20))
+		if len(body) == 0 {
+			body = []byte("{}")
+		}
+	}
+	target := "/api/v1/" + p
+	if q := r.URL.RawQuery; q != "" {
+		target += "?" + q
+	}
+	code, resp, err := srv.callRaw(r.Context(), r.Method, target, body)
+	if err != nil {
+		writeErr(w, 502, err.Error())
+		return
+	}
+	if r.Method != "GET" {
+		dropCLICache(k.ID)
+		logf("kopia %s: %s %s → %d", k.ID, r.Method, p, code)
+	}
+	if strings.HasPrefix(p, "objects/") {
+		w.Header().Set("Content-Type", "application/octet-stream")
+	} else {
+		w.Header().Set("Content-Type", "application/json")
+	}
+	w.WriteHeader(code)
+	_, _ = w.Write(resp)
 }
 
 // storageFromConfig reads the storage part of the repository config (lies on the system disk).

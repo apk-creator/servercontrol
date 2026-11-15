@@ -245,6 +245,7 @@ fun LoginScreen(state: AppState, profile: ServerProfile) {
                     Text(it)
                 }
                 state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                if (state.agentMissing?.id == profile.id || state.installLog != null) AgentMissingCard(state, profile)
             }
         }
     }
@@ -303,6 +304,7 @@ fun MainScreen(state: AppState) {
             state.navigate(Section.UPDATES)
         }
     }
+    AgentOutdatedDialog(state)
     // back: previous section; an open menu closes first (registered later = handled first)
     BackHandler(state.sectionHistory.isNotEmpty()) { state.back() }
     BackHandler(drawer.targetValue == DrawerValue.Open) { scope.launch { drawer.close() } }

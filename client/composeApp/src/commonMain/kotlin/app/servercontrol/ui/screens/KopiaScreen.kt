@@ -268,7 +268,6 @@ private fun KopiaRepoDetail(api: ApiClient, repo: KopiaRepo, onBack: () -> Unit)
     var confirm by remember { mutableStateOf<Confirm?>(null) }
     var restore by remember { mutableStateOf<KopiaSnapshot?>(null) }
     var tick by remember { mutableStateOf(0) }
-    var editSchedule by remember { mutableStateOf<Pair<String, JsonElement?>?>(null) }
     var editMaint by remember { mutableStateOf<JsonElement?>(null) }
     val base = "/api/kopia/repos/${repo.id}"
     var maintAsk by remember { mutableStateOf(false) }
@@ -298,107 +297,74 @@ private fun KopiaRepoDetail(api: ApiClient, repo: KopiaRepo, onBack: () -> Unit)
             Spacer(Modifier.weight(1f))
             RefreshButton { tick++ }
         }
+        var tab by remember { mutableStateOf(0) }
+        var policyOpen by remember { mutableStateOf<KopiaTarget?>(null) }
+        ScrollableTabRow(selectedTabIndex = tab, edgePadding = 8.dp) {
+            listOf("Snapshots", "Richtlinien", "Aufgaben", "Repository", "Einstellungen").forEachIndexed { i, t ->
+                Tab(selected = tab == i, onClick = { tab = i }, text = { Text(t) })
+            }
+        }
         Loader(Triple(repo.id, tick, freshReq), {
             // maintenance info is cached on the agent; "fresh" reads it again (wakes the disk)
             val fresh = freshReq != freshDone
             freshDone = freshReq
-            Triple(
-                api.getJson("$base/status" + if (fresh) "?fresh=1" else "", 120_000),
-                api.get<List<KopiaSnapshot>>("$base/snapshots", timeoutMs = 180_000),
-                Unit,
-            )
-        }) { (status, snaps, _), _ ->
-            val bySource = snaps.groupBy { it.source?.path ?: "?" }
-                .mapValues { (_, l) -> l.sortedByDescending { isoToMs(it.startTime) ?: 0L } }
-            val sources = (repo.sources + bySource.keys).distinct().filter { it != "?" }
-            LazyColumn {
-                item {
-                    SectionCard("Repository", stateKey = "kopia-repo") {
-                        status["error"]?.let { Text(it.str, color = StatusBad) }
-                        val st = status["status"]
-                        val d = status["drive"]
-                        val total = d["total"].long ?: 0
-                        KeyValues(
-                            "Verzeichnis" to st["storage"]["config"]["path"].str.ifBlank { st["storage"]["type"].str },
-                            "Laufwerk" to (d["disk"].str.ifBlank { d["device"].str }.ifBlank { "–" }),
-                            "Name" to (d["model"].str.ifBlank { "–" } + (d["rotational"].bool?.let { if (it) " (HDD)" else " (SSD)" } ?: "")),
-                            "Ausnutzung" to if (total > 0) "${100 * (d["used"].long ?: 0) / total} % · ${formatBytes(d["used"].long)} von ${formatBytes(total)}" else "–",
-                            "Konfiguration" to repo.configFile,
-                            "Abfrage" to if (status["via"].str == "server") "über den Kopia-Server (Platte bleibt im Standby)" else "Kommandozeile (weckt die Platte)",
-                        )
-                    }
-                }
-                sources.forEach { src ->
-                    val list = bySource[src].orEmpty()
-                    val suffix = if (sources.size > 1) " · $src" else ""
-                    item(key = "src-$src") {
-                        SectionCard("Sicherung$suffix", stateKey = "kopia-src") {
+            api.getJson("$base/status" + if (fresh) "?fresh=1" else "", 120_000)
+        }, showSpinnerOnReload = false) { status, _ ->
+            val viaServer = status["via"].str == "server"
+            if (!viaServer && tab != 3) {
+                ErrorCard("Kein laufender Kopia-Server für dieses Repository gefunden – Richtlinien, Aufgaben und Einstellungen gibt es nur über den Server. Unten die Snapshots über die Kommandozeile (weckt die Platte).")
+                if (tab == 0) KopiaCliSnapshots(api, base, tick) { restore = it }
+                return@Loader
+            }
+            when (tab) {
+                0 -> KopiaSnapshotsTab(api, base, host, tick, onRestore = { restore = it }, onPolicy = { policyOpen = it; tab = 1 })
+                1 -> KopiaPoliciesTab(api, base, host, tick, policyOpen) { policyOpen = it }
+                2 -> KopiaTasksTab(api, base, host, tick)
+                3 -> LazyColumn {
+                    item {
+                        SectionCard("Repository", stateKey = "kopia-repo") {
+                            status["error"]?.let { Text(it.str, color = StatusBad) }
+                            val st = status["status"]
+                            val d = status["drive"]
+                            val total = d["total"].long ?: 0
                             KeyValues(
-                                "Verzeichnis" to src,
-                                "Snapshots" to if (list.isEmpty()) "keine" else "${list.size} · letzter ${localTime(list.first().startTime)} · ${formatBytes(list.first().totalSize)}",
+                                "Verzeichnis" to st["storage"]["config"]["path"].str.ifBlank { st["storage"]["type"].str },
+                                "Laufwerk" to (d["disk"].str.ifBlank { d["device"].str }.ifBlank { "–" }),
+                                "Name" to (d["model"].str.ifBlank { "–" } + (d["rotational"].bool?.let { if (it) " (HDD)" else " (SSD)" } ?: "")),
+                                "Ausnutzung" to if (total > 0) "${100 * (d["used"].long ?: 0) / total} % · ${formatBytes(d["used"].long)} von ${formatBytes(total)}" else "–",
+                                "Konfiguration" to repo.configFile,
+                                "Abfrage" to if (viaServer) "über den Kopia-Server (Platte bleibt im Standby)" else "Kommandozeile (weckt die Platte)",
                             )
-                            if (sources.size > 1) ButtonRow {
-                                SmallButton("Nur diese Quelle sichern", { host.post("Snapshot $src", "$base/snapshot", """{"source":${jsonString(src)}}""") })
+                        }
+                    }
+                    if (viaServer) item { KopiaServerRepoCard(api, base, host, tick) }
+                    item(key = "maintenance") {
+                        SectionCard("Wartung", stateKey = "kopia-maint") {
+                            val m = status["maintenance"]
+                            val rows = mutableListOf(
+                                "Kurzwartung" to (if (m["quick"]["enabled"].bool == true) "alle ${hoursOf(m["quick"]["interval"].long)}" else "aus"),
+                                "Wartung" to (if (m["full"]["enabled"].bool == true) "alle ${hoursOf(m["full"]["interval"].long)}" else "aus"),
+                            )
+                            m["owner"].str.takeIf { it.isNotBlank() }?.let { rows += "Zuständig" to it }
+                            m["runs"].obj.forEach { (k, v) ->
+                                val last = v.arr.firstOrNull()
+                                if (last != null) rows += "Zuletzt $k" to localTime(last["end"].str) + if (last["success"].bool == false) " ✗" else " ✓"
+                            }
+                            status["maintenanceAt"].long?.takeIf { it > 0 }?.let { rows += "Stand" to formatTime(it).dropLast(3) }
+                            rows.forEachIndexed { i, (k, v) -> KeyValue(k, v, i) }
+                            Text("Laufen die Wartungen über eigene Skripte (z. B. nach dem Snapshot), hier „aus“ lassen. " +
+                                "Die Wartungsinfo wird zwischengespeichert, weil das Lesen die Platte weckt.", fontSize = TextSmall)
+                            ButtonRow {
+                                SmallButton("Wartung einstellen", { editMaint = m ?: kotlinx.serialization.json.JsonObject(emptyMap()) })
+                                SmallButton("Neu lesen", { freshReq++ })
                             }
                         }
                     }
-                    item(key = "snaps-$src") {
-                        SectionCard("Snapshots$suffix", stateKey = "kopia-snaps") {
-                            if (list.isEmpty()) Text("Keine Snapshots vorhanden.", fontSize = TextSmall)
-                            list.forEachIndexed { i, s ->
-                                Row(
-                                    Modifier.fillMaxWidth().background(stripe(i)).clickable { restore = s }.padding(start = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Column(Modifier.weight(1f).padding(vertical = 4.dp)) {
-                                        Text(localTime(s.startTime))
-                                        Text("${formatBytes(s.totalSize)} · ${s.files ?: "?"} Dateien" +
-                                            (if ((s.errors ?: 0) > 0) " · ${s.errors} Fehler" else "") +
-                                            (s.retention?.takeIf { it.isNotEmpty() }?.let { " · " + it.joinToString() } ?: ""),
-                                            fontSize = TextSmall, color = if ((s.errors ?: 0) > 0) StatusWarn else MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
-                                    IconButton(onClick = { restore = s }) { Icon(Icons.Default.Settings, "Wiederherstellen oder löschen", Modifier.size(20.dp)) }
-                                }
-                            }
-                        }
-                    }
+                    item { Spacer(Modifier.heightIn(min = 24.dp)) }
                 }
-                if (snaps.isEmpty() && sources.isEmpty()) item { Text("Keine Snapshots vorhanden.", Modifier.padding(16.dp)) }
-                item(key = "schedules") {
-                    SectionCard("Zeitplan", stateKey = "kopia-schedules") {
-                        val srcIds = snaps.mapNotNull { sourceId(it.source) }.distinct()
-                        if (srcIds.isEmpty()) Text("Zeitpläne gelten je Sicherung; sie erscheinen nach dem ersten Snapshot.", fontSize = TextSmall)
-                        srcIds.forEach { id -> ScheduleBlock(api, base, id, tick, srcIds.size > 1) { pol -> editSchedule = id to pol } }
-                    }
-                }
-                item(key = "maintenance") {
-                    SectionCard("Wartung", stateKey = "kopia-maint") {
-                        val m = status["maintenance"]
-                        val rows = mutableListOf(
-                            "Kurzwartung" to (if (m["quick"]["enabled"].bool == true) "alle ${hoursOf(m["quick"]["interval"].long)}" else "aus"),
-                            "Wartung" to (if (m["full"]["enabled"].bool == true) "alle ${hoursOf(m["full"]["interval"].long)}" else "aus"),
-                        )
-                        m["owner"].str.takeIf { it.isNotBlank() }?.let { rows += "Zuständig" to it }
-                        m["runs"].obj.forEach { (k, v) ->
-                            val last = v.arr.firstOrNull()
-                            if (last != null) rows += "Zuletzt $k" to localTime(last["end"].str) + if (last["success"].bool == false) " ✗" else " ✓"
-                        }
-                        status["maintenanceAt"].long?.takeIf { it > 0 }?.let { rows += "Stand" to formatTime(it).dropLast(3) }
-                        rows.forEachIndexed { i, (k, v) -> KeyValue(k, v, i) }
-                        Text("Laufen die Wartungen über eigene Skripte (z. B. nach dem Snapshot), hier „aus“ lassen. " +
-                            "Die Wartungsinfo wird zwischengespeichert, weil das Lesen die Platte weckt.", fontSize = TextSmall)
-                        ButtonRow {
-                            SmallButton("Wartung einstellen", { editMaint = m ?: kotlinx.serialization.json.JsonObject(emptyMap()) })
-                            SmallButton("Neu lesen", { freshReq++ })
-                        }
-                    }
-                }
-                item { Spacer(Modifier.heightIn(min = 24.dp)) }
+                else -> KopiaPrefsTab(api, base, host, tick)
             }
         }
-    }
-    editSchedule?.let { (src, pol) ->
-        ScheduleEditor(api, base, src, pol, host) { editSchedule = null; tick++ }
     }
     editMaint?.let { m ->
         MaintenanceEditor(base, m, host) { editMaint = null; tick++ }
@@ -447,92 +413,22 @@ private fun KopiaRepoDetail(api: ApiClient, repo: KopiaRepo, onBack: () -> Unit)
     ActionResultDialog(host, api)
 }
 
-/** Snapshot schedule and retention of one source (effective policy). */
+/** snapshots via the CLI when no Kopia server runs (wakes the disk) */
 @Composable
-private fun ScheduleBlock(api: ApiClient, base: String, source: String, tick: Int, showTitle: Boolean, onEdit: (JsonElement?) -> Unit) {
-    var pol by remember(source, tick) { mutableStateOf<JsonElement?>(null) }
-    var err by remember(source, tick) { mutableStateOf<String?>(null) }
-    LaunchedEffect(source, tick) {
-        try { pol = api.getJson("$base/schedule?source=${encQ(source)}") } catch (e: Throwable) { err = e.message }
-    }
-    if (showTitle) Text(source.substringAfter(':'), fontWeight = Bold)
-    err?.let { Text(it, color = StatusBad, fontSize = TextSmall) }
-    val p = pol ?: run { if (err == null) LinearProgressIndicator(Modifier.fillMaxWidth()); return }
-    val sch = p["scheduling"]
-    val times = sch["timeOfDay"].arr.joinToString(", ") { "${it["hour"].long?.toString()?.padStart(2, '0')}:${it["min"].long?.toString()?.padStart(2, '0')}" }
-    val interval = sch["intervalSeconds"].long?.takeIf { it > 0 }?.let { hoursOf(it * 1_000_000_000) }
-    val cron = sch["cron"].arr.joinToString("; ") { it.str }
-    val ret = p["retention"]
-    // Retention: only values greater than 1, e.g. "täglich 14"
-    val retention = listOf("keepLatest" to "letzte", "keepHourly" to "stündlich", "keepDaily" to "täglich",
-        "keepWeekly" to "wöchentlich", "keepMonthly" to "monatlich", "keepAnnual" to "jährlich")
-        .mapNotNull { (key, label) -> ret[key].long?.takeIf { it > 1 }?.let { "$label $it" } }
-        .joinToString(" · ")
-    val rows = listOfNotNull(
-        "Uhrzeiten" to times.ifBlank { "–" },
-        interval?.let { "Intervall" to "alle $it" },
-        cron.takeIf { it.isNotBlank() }?.let { "Crontab" to it },
-        if (sch["manual"].bool == true) "Modus" to "nur manuell" else null,
-        "Retention" to retention.ifBlank { "–" },
-        p["upcomingSnapshotTimes"].arr.take(2).map { localTime(it.str) }.takeIf { it.isNotEmpty() }?.let { "Nächste" to it.joinToString(", ") },
-    )
-    rows.forEachIndexed { i, (a, b) -> KeyValue(a, b, i) }
-    ButtonRow { SmallButton("Zeitplan einstellen", { onEdit(p) }) }
-}
-
-private fun encQ(s: String) = s.replace("%", "%25").replace(" ", "%20").replace("&", "%26").replace("+", "%2B").replace("#", "%23").replace("?", "%3F")
-
-@Composable
-private fun ScheduleEditor(api: ApiClient, base: String, source: String, pol: JsonElement?, host: ActionHost, onDone: () -> Unit) {
-    val sch = pol["scheduling"]
-    val ret = pol["retention"]
-    val initialInterval = sch["intervalSeconds"].long?.takeIf { it > 0 }?.let { (it / 3600).toString() } ?: ""
-    var times by remember { mutableStateOf(sch["timeOfDay"].arr.joinToString(", ") { "${it["hour"].long?.toString()?.padStart(2, '0')}:${it["min"].long?.toString()?.padStart(2, '0')}" }) }
-    var interval by remember { mutableStateOf(initialInterval) }
-    var cron by remember { mutableStateOf(sch["cron"].arr.joinToString("; ") { it.str }) }
-    val keys = listOf("latest" to "Letzte", "hourly" to "Stündlich", "daily" to "Täglich", "weekly" to "Wöchentlich", "monthly" to "Monatlich", "annual" to "Jährlich")
-    val keep = remember {
-        androidx.compose.runtime.mutableStateMapOf<String, String>().apply {
-            keys.forEach { (k, _) -> put(k, ret["keep" + k.replaceFirstChar { it.uppercase() }].long?.toString() ?: "") }
+private fun KopiaCliSnapshots(api: ApiClient, base: String, tick: Int, onSelect: (KopiaSnapshot) -> Unit) {
+    Loader(base to tick, { api.get<List<KopiaSnapshot>>("$base/snapshots", timeoutMs = 180_000) }) { snaps, _ ->
+        val list = snaps.sortedByDescending { isoToMs(it.startTime) ?: 0L }
+        LazyColumn {
+            itemsIndexed(list) { i, s ->
+                StripedItem(
+                    i,
+                    headline = { Text(localTime(s.startTime)) },
+                    supporting = { Text("${s.source?.path} · ${formatBytes(s.totalSize)} · ${s.files ?: "?"} Dateien", fontSize = TextSmall) },
+                    onClick = { onSelect(s) },
+                )
+            }
         }
     }
-    AppDialog(
-        onDismissRequest = onDone,
-        title = { Text("Zeitplan · ${source.substringAfter(':')}") },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Die Werte gelten für diese Sicherung. Leere Felder übernehmen die globale Vorgabe des Repositorys.", fontSize = TextSmall)
-                OutlinedTextField(times, { times = it }, Modifier.fillMaxWidth(), label = { Text("Uhrzeiten (z. B. 01:00, 13:00)") }, singleLine = true)
-                OutlinedTextField(interval, { interval = it.filter(Char::isDigit).take(4) }, Modifier.fillMaxWidth(),
-                    label = { Text("Zusätzlich alle … Stunden (0 = kein Intervall)") }, singleLine = true)
-                OutlinedTextField(cron, { cron = it }, Modifier.fillMaxWidth(), label = { Text("Crontab (optional, z. B. 0 1 * * *)") }, singleLine = true)
-                Text("Retention (Anzahl Snapshots)", fontWeight = Bold)
-                keys.chunked(2).forEach { pair ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        pair.forEach { (k, label) ->
-                            OutlinedTextField(keep[k] ?: "", { v -> keep[k] = v.filter(Char::isDigit).take(5) }, Modifier.weight(1f), label = { Text(label) }, singleLine = true)
-                        }
-                    }
-                }
-                Text("Der Kopia-Dienst auf dem Server übernimmt geänderte Zeitpläne, sobald er die Richtlinien neu einliest; im Zweifel seinen Dienst neu starten.", fontSize = TextSmall)
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                val body = buildJsonObject {
-                    put("source", source)
-                    put("times", times.replace(" ", ""))
-                    put("crontab", cron.trim())
-                    if (interval != initialInterval) put("intervalHours", interval.toIntOrNull() ?: 0)
-                    put("keep", buildJsonObject { keys.forEach { (k, _) -> put(k, keep[k] ?: "") } })
-                }.toString()
-                host.run("Zeitplan gespeichert", { api.postRaw("$base/schedule", body); "Richtlinie für $source gespeichert." }, after = {
-                    if ((host.result as? ActionResult.Message)?.ok == true) onDone()
-                })
-            }) { Text("Speichern") }
-        },
-        dismissButton = { TextButton(onClick = onDone) { Text("Abbrechen") } },
-    )
 }
 
 @Composable

@@ -128,10 +128,12 @@ val StatusBad = Color(0xFFC62828)
 fun <T> Loader(
     key: Any?,
     load: suspend () -> T,
+    /** false: keep showing the old data while reloading (polling lists) */
+    showSpinnerOnReload: Boolean = true,
     content: @Composable (data: T, reload: () -> Unit) -> Unit,
 ) {
     var tick by remember { mutableIntStateOf(0) }
-    var data by remember(key) { mutableStateOf<T?>(null) }
+    var data by remember(if (showSpinnerOnReload) key else Unit) { mutableStateOf<T?>(null) }
     var err by remember(key) { mutableStateOf<String?>(null) }
     var loading by remember(key) { mutableStateOf(true) }
     LaunchedEffect(key, tick) {
@@ -146,7 +148,7 @@ fun <T> Loader(
     }
     val reload: () -> Unit = { tick++ }
     Column(Modifier.fillMaxSize()) {
-        if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
+        if (loading && (showSpinnerOnReload || data == null)) LinearProgressIndicator(Modifier.fillMaxWidth())
         err?.let { ErrorCard(it, reload) }
         val d = data
         if (d != null) content(d, reload)
@@ -182,11 +184,12 @@ fun SectionCard(
     modifier: Modifier = Modifier,
     collapsible: Boolean = true,
     stateKey: String? = null,
+    initiallyCollapsed: Boolean = false,
     actions: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {},
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val key = stateKey ?: title ?: ""
-    val closed = collapsible && title != null && CardState.collapsed[key] == true
+    val closed = collapsible && title != null && (CardState.collapsed[key] ?: initiallyCollapsed)
     Card(modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
         Column(Modifier.padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = if (closed) 4.dp else 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             if (title != null) {

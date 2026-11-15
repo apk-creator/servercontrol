@@ -54,6 +54,17 @@ class SshHostKeyChanged(val fingerprint: String) : Exception("Der SSH-Hostschlü
 /** Opens an SSH session with a PTY. [knownHostKey] = "SHA256:…" fingerprint, empty on first use. */
 expect suspend fun openSsh(host: String, port: Int, auth: SshAuth, knownHostKey: String, cols: Int, rows: Int): SshShell
 
+/** Uploads [files] into a private temp folder and runs [script] there with sudo; returns exit code and output. */
+expect suspend fun sshSudoScript(
+    host: String, port: Int, auth: SshAuth, knownHostKey: String, sudoPassword: String?,
+    files: Map<String, ByteArray>, script: String,
+): Pair<Int, String>
+
+expect suspend fun tcpReachable(host: String, port: Int, timeoutMs: Int): Boolean
+
+/** agent package built with this app version (servercontrol-agent.tar.gz), null in development builds */
+expect fun bundledAgentPackage(): ByteArray?
+
 /** Single secret input (API key, repository password, token) – autofill-capable like [CredentialFields]. */
 @Composable
 expect fun SecretField(value: String, onValue: (String) -> Unit, label: String)

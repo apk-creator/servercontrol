@@ -48,8 +48,7 @@ private class JschShell(
     }
 }
 
-actual suspend fun openSsh(host: String, port: Int, auth: SshAuth, knownHostKey: String, cols: Int, rows: Int): SshShell =
-    withContext(Dispatchers.IO) {
+private fun jschConnect(host: String, port: Int, auth: SshAuth, knownHostKey: String): Session {
         val jsch = JSch()
         var seenFp = ""
         var seenType = ""
@@ -102,6 +101,12 @@ actual suspend fun openSsh(host: String, port: Int, auth: SshAuth, knownHostKey:
                 else -> throw Exception("SSH-Verbindung fehlgeschlagen: $m", e)
             }
         }
+        return session
+}
+
+actual suspend fun openSsh(host: String, port: Int, auth: SshAuth, knownHostKey: String, cols: Int, rows: Int): SshShell =
+    withContext(Dispatchers.IO) {
+        val session = jschConnect(host, port, auth, knownHostKey)
         val channel = session.openChannel("shell") as ChannelShell
         channel.setPtyType("xterm-256color")
         channel.setPtySize(cols, rows, cols * 8, rows * 16)
@@ -111,3 +116,49 @@ actual suspend fun openSsh(host: String, port: Int, auth: SshAuth, knownHostKey:
         channel.connect(10_000)
         JschShell(session, channel, input, output)
     }
+
+/** Uploads [files] into a fresh private temp folder and runs [script] there with sudo (agent installation). */
+actual suspend fun sshSudoScript(
+    host: String, port: Int, auth: SshAuth, knownHostKey: String, sudoPassword: String?,
+    files: Map<String, ByteArray>, script: String,
+): Pair<Int, String> = withContext(Dispatchers.IO) {
+    val session = jschConnect(host, port, auth, knownHostKey)
+    val dir = "/tmp/servercontrol-install-" + java.util.UUID.randomUUID().toString().take(8)
+    fun exec(cmd: String, stdin: String?): Pair<Int, String> {
+        val ch = session.openChannel("exec") as com.jcraft.jsch.ChannelExec
+        ch.setCommand(cmd)
+        val out = ch.inputStream
+        val inp = ch.outputStream
+        ch.connect(15_000)
+        if (stdin != null) inp.write(stdin.toByteArray())
+        inp.flush()
+        inp.close()
+        val text = out.readBytes().decodeToString()
+        var waited = 0
+        while (!ch.isClosed && waited < 100) { Thread.sleep(50); waited++ }
+        val code = ch.exitStatus
+        ch.disconnect()
+        return code to text
+    }
+    try {
+        val sftp = session.openChannel("sftp") as com.jcraft.jsch.ChannelSftp
+        sftp.connect(15_000)
+        sftp.mkdir(dir)
+        sftp.chmod("700".toInt(8), dir)
+        (files + ("install.sh" to script.toByteArray())).forEach { (name, data) ->
+            sftp.put(java.io.ByteArrayInputStream(data), "$dir/$name")
+            sftp.chmod("600".toInt(8), "$dir/$name")
+        }
+        sftp.disconnect()
+        val cmd = if (auth.user == "root") "sh $dir/install.sh 2>&1" else "sudo -S -p '' sh $dir/install.sh 2>&1"
+        exec(cmd, (sudoPassword ?: "") + "\n")
+    } finally {
+        // the folder holds the agent password: remove it in any case
+        runCatching { exec("rm -rf $dir", null) }
+        session.disconnect()
+    }
+}
+
+actual suspend fun tcpReachable(host: String, port: Int, timeoutMs: Int): Boolean = withContext(Dispatchers.IO) {
+    runCatching { java.net.Socket().use { it.connect(java.net.InetSocketAddress(host, port), timeoutMs) } }.isSuccess
+}

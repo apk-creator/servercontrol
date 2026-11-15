@@ -315,3 +315,6 @@ internal suspend fun fastDownload(
 
 actual val deviceName: String = runCatching { java.net.InetAddress.getLocalHost().hostName }.getOrNull()
     ?.takeIf { it.isNotBlank() }?.let { "$it (${System.getProperty("os.name")})" } ?: System.getProperty("os.name")
+
+actual fun bundledAgentPackage(): ByteArray? =
+    runCatching { object {}.javaClass.getResourceAsStream("/agent/servercontrol-agent.tar.gz")?.use { it.readBytes() } }.getOrNull()
