@@ -1,14 +1,21 @@
 package app.servercontrol
 
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.Surface
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.HelpOutline
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -34,17 +41,17 @@ fun helpFor(section: Section): List<Pair<String, String>> = when (section) {
     Section.OVERVIEW -> listOf(
         "Neustart / Herunterfahren" to "Sofort, in 1 oder in 5 Minuten. Ein geplanter Vorgang erscheint darunter und lässt sich abbrechen. Nach dem Herunterfahren geht Einschalten aus der Ferne nur per Wake-on-LAN.",
         "System" to "Hostname, Betriebssystem, Kernel, CPU, Laufzeit und Temperaturen (min / Ø / max). Ein Tipp auf eine Temperaturzeile zeigt die einzelnen Sensoren. Schlafende Platten werden dafür nicht geweckt; für sie gilt der letzte gemessene Wert.",
-        "Auslastung" to "CPU (Tipp: alle Kerne), Arbeitsspeicher, Swap und Festplatten-I/O.",
+        "Auslastung" to "CPU (Tipp: alle Kerne), Arbeitsspeicher, Swap, Festplatten-I/O und Netzwerk. Der Netzwerkbalken bezieht sich auf die höchste Rate im Verlauf. Darunter klappt der Auslastungsverlauf auf: alles seit dem Start des Agenten, höchstens 24 Stunden, skaliert auf den Bereich des Zeitraums (links Maximum, rechts Minimum).",
         "Laufwerke" to "Jedes Laufwerk in einer Zeile: Zustand (aktiv, idle, Standby), SMART-Status und Belegung. Grauer SMART-Status = letzter bekannter Wert, weil die Platte schläft. Tipp öffnet System → Speicher.",
-        "Verlauf" to "Alles seit dem Start des Agenten, höchstens 24 Stunden. Die Diagramme sind auf den höchsten Wert des Zeitraums skaliert („Spitze“).",
     )
     Section.SYSTEM -> listOf(
         "Dienste" to "Alle systemd-Dienste mit Suche und Filter (alle, aktiv, fehlgeschlagen). Antippen: Start, Stopp, Neustart, Konfiguration neu laden, Autostart an/aus, Fehler zurücksetzen, Logs.",
         "Prozesse" to "Laufende Prozesse, sortiert nach CPU oder RAM. Antippen zum Beenden (oder Erzwingen).",
         "Container" to "Docker-/Podman-Container: Status, Starten, Stoppen, Neustarten, Protokoll.",
         "Speicher → Laufwerke" to "NVMe vor SATA. Je Laufwerk Zustand, SMART und Belegung der eingehängten Dateisysteme. Antippen öffnet die Laufwerksseite mit allen Details: Partitionen anlegen und löschen, Partitionstabelle, Formatieren (ext4, xfs, btrfs, exFAT, FAT32, NTFS), Umbenennen, Ein- und Aushängen (wahlweise dauerhaft über die fstab mit nofail). Löschende Aktionen verlangen die Eingabe des Gerätenamens; Laufwerke mit dem laufenden System sind dafür gesperrt. Ein Tipp auf SMART zeigt die Werte und startet Selbsttests; schlafende Platten werden nur auf Wunsch geweckt.",
-        "Speicher → Auto-Standby" to "Leerlaufzeit je HDD, verwaltet von hd-idle. 10–30 Minuten sind ein guter Wert; zu kurze Zeiten verschleißen Motor und Mechanik. Das Mondsymbol schickt eine Platte sofort schlafen. Andere Dienste, die per hdparm eigene Standby-Zeiten setzen, werden beim Speichern abgeschaltet.",
+        "Speicher → Spindown" to "Leerlaufzeit je HDD, nach der sie sich abschaltet, verwaltet von hd-idle. Eine Änderung wird sofort gespeichert. 10–30 Minuten sind ein guter Wert; zu kurze Zeiten verschleißen Motor und Mechanik. Das Mondsymbol schickt eine Platte sofort schlafen. Andere Dienste, die per hdparm eigene Standby-Zeiten setzen, werden dabei abgeschaltet.",
         "Netzwerk" to "Schnittstellen mit Adressen und Verkehr sowie die WireGuard-Peers des Servers mit letztem Handshake.",
+        "Konten" to "Benutzerkonten des Servers (UID, Home, Shell) und die letzten Anmeldungen.",
         "Protokolle" to "journald, neueste Einträge oben. Filter nach Dienst (z. B. „kopia“ findet alle Kopia-Dienste), Suchtext, Fehler/Warnungen und „seit Boot“ greifen von selbst.",
     )
     Section.TERMINAL -> listOf(
@@ -62,9 +69,8 @@ fun helpFor(section: Section): List<Pair<String, String>> = when (section) {
         "Agent" to "Der Agent lädt das Release von GitHub, prüft die SHA-256-Prüfsumme, ersetzt sich selbst und startet neu. Erst den Agent, dann die App aktualisieren.",
         "Server" to "apt-Updates; Sicherheitsupdates sind rot. Full-Upgrade kann auch Pakete entfernen oder neu installieren.",
     )
-    Section.ACCOUNTS -> listOf("Konten" to "Benutzerkonten des Servers (UID, Home, Shell) und die letzten Anmeldungen.")
     Section.KOPIA -> listOf(
-        "Repositories" to "Ein Reiter je Repository. Oben: Snapshot starten, Verifizieren (liest 1 % zurück, weckt die Platte), Wartung (kurz oder vollständig), Neu laden; das Zahnrad bearbeitet das Repository oder fügt ein neues hinzu (auf dem Server suchen, verbinden/neu anlegen, Config-Datei).",
+        "Repositories" to "Ein Reiter je Repository, ganz rechts „+“ zum Hinzufügen (auf dem Server suchen, verbinden oder neu anlegen, Config-Datei eintragen). Oben: Snapshot starten, Verifizieren (liest 1 % zurück, weckt die Platte), Wartung (kurz oder vollständig), Neu laden; das Zahnrad öffnet die Einstellungen des Repositorys.",
         "Snapshots" to "Quellen mit letztem und nächstem Snapshot. Antippen öffnet den Verlauf mit Anheften, Beschreibung, Durchsuchen, Wiederherstellen und Löschen.",
         "Richtlinien" to "Alle Richtlinien wie in der Kopia-Weboberfläche: Aufbewahrung, Dateien, Fehlerbehandlung, Komprimierung, Zeitplan, Hochladen, Aktionen, Protokollierung. Leere Felder werden geerbt.",
         "Aufgaben" to "Laufende und letzte Aufgaben des Kopia-Servers mit Protokoll und Abbrechen.",
@@ -92,20 +98,28 @@ fun helpFor(section: Section): List<Pair<String, String>> = when (section) {
     )
 }
 
-/** "?" in the title bar: drop-down "Hinweis" with the functions of the current menu */
+/** "?" in the title bar: full-screen description of the current menu */
 @Composable
 fun HelpButton(section: Section) {
     var open by remember { mutableStateOf(false) }
     IconButton(onClick = { open = true }) { Icon(Icons.AutoMirrored.Filled.HelpOutline, "Hinweis") }
-    DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-        Column(Modifier.widthIn(max = 380.dp).heightIn(max = 520.dp).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp)) {
-            Text("Hinweis", fontWeight = FontWeight.SemiBold)
-            helpFor(section).forEach { (title, text) ->
-                Text(title, Modifier.padding(top = 10.dp), fontWeight = FontWeight.SemiBold, fontSize = TextSmall)
-                Text(text, fontSize = TextSmall)
+    if (open) Dialog(onDismissRequest = { open = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
+            Column(Modifier.fillMaxSize()) {
+                Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Spacer(Modifier.weight(1f))
+                    IconButton(onClick = { open = false }) { Icon(Icons.Default.Close, "Schließen") }
+                }
+                Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 4.dp)) {
+                    helpFor(section).forEach { (title, text) ->
+                        Text(title, Modifier.padding(top = 14.dp), fontWeight = FontWeight.SemiBold)
+                        Text(text, Modifier.padding(top = 2.dp), fontSize = TextSmall)
+                    }
+                    HorizontalDivider(Modifier.padding(vertical = 14.dp))
+                    Text(COMMON, fontSize = TextSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.height(24.dp))
+                }
             }
-            HorizontalDivider(Modifier.padding(vertical = 10.dp))
-            Text(COMMON, fontSize = TextSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

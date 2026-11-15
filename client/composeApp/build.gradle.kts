@@ -9,7 +9,7 @@ plugins {
 }
 
 // release tags have two parts (v1.8); installers need MAJOR.MINOR.PATCH
-val appVersion = "1.15"
+val appVersion = "1.16"
 val ktor = "3.1.3"
 
 // APP_VERSION constant for the in-app updater
@@ -74,24 +74,22 @@ android {
         versionCode = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
         versionName = appVersion
     }
+    // Release key only from the GitHub secrets (SIGNING_*); without them (local builds) the
+    // Android debug key is used – such APKs cannot update an installed release.
+    fun env(name: String) = System.getenv(name)?.takeIf { it.isNotBlank() }
+    val releaseKey = env("SIGNING_KEYSTORE_FILE")
     signingConfigs {
-        create("ci") {
-            // Stable signing key so updates install over the previous version.
-            // Prefer GitHub secrets; fall back to the keystore in the (private) repo.
-            fun env(name: String) = System.getenv(name)?.takeIf { it.isNotBlank() }
-            storeFile = env("SIGNING_KEYSTORE_FILE")?.let { file(it) } ?: file("signing/servercontrol.keystore")
-            storePassword = env("SIGNING_STORE_PASSWORD") ?: "servercontrol"
-            keyAlias = env("SIGNING_KEY_ALIAS") ?: "servercontrol"
-            keyPassword = env("SIGNING_KEY_PASSWORD") ?: "servercontrol"
+        if (releaseKey != null) create("ci") {
+            storeFile = file(releaseKey)
+            storePassword = env("SIGNING_STORE_PASSWORD")
+            keyAlias = env("SIGNING_KEY_ALIAS")
+            keyPassword = env("SIGNING_KEY_PASSWORD")
         }
     }
     buildTypes {
         getByName("release") {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("ci")
-        }
-        getByName("debug") {
-            signingConfig = signingConfigs.getByName("ci")
+            signingConfig = signingConfigs.getByName(if (releaseKey != null) "ci" else "debug")
         }
     }
     compileOptions {

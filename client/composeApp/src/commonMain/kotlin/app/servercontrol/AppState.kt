@@ -31,7 +31,7 @@ sealed interface Screen {
 
 enum class Section(val title: String, val module: String? = null) {
     OVERVIEW("Übersicht"), SYSTEM("System"), TERMINAL("Terminal"), FILES("Dateien"), UPDATES("Updates"),
-    ACCOUNTS("Konten"), KOPIA("Kopia"), NEXTCLOUD("Nextcloud"), IMMICH("Immich"),
+    KOPIA("Kopia"), NEXTCLOUD("Nextcloud"), IMMICH("Immich"),
     SHELL("Befehl", "shell"), AGENT("Agent"),
 }
 
@@ -43,7 +43,8 @@ object SystemTab {
     const val STORAGE = "Speicher"
     const val NETWORK = "Netzwerk"
     const val LOGS = "Protokolle"
-    val all = listOf(SERVICES, PROCESSES, CONTAINERS, STORAGE, NETWORK, LOGS)
+    const val ACCOUNTS = "Konten"
+    val all = listOf(SERVICES, PROCESSES, CONTAINERS, STORAGE, NETWORK, LOGS, ACCOUNTS)
 }
 
 class Session(

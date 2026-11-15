@@ -79,13 +79,16 @@ fun ChartBlock(title: String, value: String, series: List<ChartSeries>, capacity
     ) {
         Row(Modifier.fillMaxWidth()) {
             Text(title, Modifier.weight(1f))
-            Text(value, fontSize = TextSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(value)
         }
         LineChart(series, capacity, maxY)
-        // scaled to the largest value of the period: show what the top line means
+        // scaled to the period's range: largest value left, smallest right
         if (scale != null) {
-            val top = series.maxOfOrNull { it.values.maxOrNull() ?: 0.0 } ?: 0.0
-            Text("Spitze ${scale(top)}", fontSize = TextSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            val all = series.flatMap { it.values }
+            Row(Modifier.fillMaxWidth()) {
+                Text("${scale(all.maxOrNull() ?: 0.0)} Max.", Modifier.weight(1f), fontSize = TextSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("${scale(all.minOrNull() ?: 0.0)} Min.", fontSize = TextSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
     }
 }

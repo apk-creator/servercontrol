@@ -184,7 +184,7 @@ fun SectionCard(
     modifier: Modifier = Modifier,
     collapsible: Boolean = true,
     stateKey: String? = null,
-    initiallyCollapsed: Boolean = false,
+    initiallyCollapsed: Boolean = true,
     actions: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {},
     content: @Composable ColumnScope.() -> Unit,
 ) {
@@ -329,18 +329,21 @@ fun KeyValues(vararg rows: Pair<String, String>?) {
 }
 
 @Composable
-fun UsageBar(label: String, used: Long, total: Long, detail: String, index: Int = -1) {
+fun UsageBar(label: String, used: Long, total: Long, detail: String, index: Int = -1, color: Color? = null, bigDetail: Boolean = false) {
     val p = pct(used, total)
     Column(
         Modifier.fillMaxWidth()
             .background(if (index >= 0) stripe(index) else Color.Transparent, androidx.compose.foundation.shape.RoundedCornerShape(4.dp))
             .padding(horizontal = 4.dp, vertical = 4.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) { Text(label, Modifier.weight(1f)); Text(detail, fontSize = TextSmall) }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(label, Modifier.weight(1f))
+            if (bigDetail) Text(detail) else Text(detail, fontSize = TextSmall)
+        }
         LinearProgressIndicator(
             progress = { p },
             modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
-            color = when { p > 0.9f -> StatusBad; p > 0.75f -> StatusWarn; else -> MaterialTheme.colorScheme.primary },
+            color = color ?: when { p > 0.9f -> StatusBad; p > 0.75f -> StatusWarn; else -> MaterialTheme.colorScheme.primary },
         )
     }
 }

@@ -260,7 +260,6 @@ fun Section.icon(): ImageVector = when (this) {
     Section.SYSTEM -> Icons.Default.Dns
     Section.FILES -> Icons.Default.Folder
     Section.UPDATES -> Icons.Default.SystemUpdate
-    Section.ACCOUNTS -> Icons.Default.People
     Section.KOPIA -> Icons.Default.Backup
     Section.NEXTCLOUD -> Icons.Default.Cloud
     Section.IMMICH -> Icons.Default.PhotoLibrary
@@ -374,7 +373,6 @@ fun SectionContent(state: AppState, session: Session) {
         Section.AGENT -> AgentScreen(state, api)
         Section.FILES -> FilesScreen(api)
         Section.UPDATES -> UpdatesScreen(state, api)
-        Section.ACCOUNTS -> AccountsScreen(api)
         Section.KOPIA -> KopiaScreen(api)
         Section.NEXTCLOUD -> NextcloudScreen(api)
         Section.IMMICH -> ImmichScreen(api)

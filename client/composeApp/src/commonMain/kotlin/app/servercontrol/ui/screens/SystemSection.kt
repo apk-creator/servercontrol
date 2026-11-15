@@ -20,6 +20,7 @@ fun SystemScreen(state: AppState, api: ApiClient) {
             SystemTab.STORAGE -> StorageScreen(api)
             SystemTab.NETWORK -> NetworkScreen(api)
             SystemTab.LOGS -> LogsScreen(api)
+            SystemTab.ACCOUNTS -> AccountsScreen(api)
         }
     }
 }

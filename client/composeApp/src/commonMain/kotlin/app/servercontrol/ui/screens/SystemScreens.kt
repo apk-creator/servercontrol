@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Bedtime
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.ui.graphics.Color
@@ -142,39 +144,43 @@ fun OverviewScreen(api: ApiClient, goTo: (String) -> Unit) {
         card("Auslastung") { SectionCard("Auslastung") {
             var n = 0
             Column(Modifier.clickable { popup = "cores" }) {
-                UsageBar("CPU  ›", (o.cpuPercent * 10).toLong(), 1000, "${(o.cpuPercent * 10).roundToInt() / 10.0} %", n++)
+                UsageBar("CPU  ›", (o.cpuPercent * 10).toLong(), 1000, "${(o.cpuPercent * 10).roundToInt() / 10.0} %", n++, ChartCpu, true)
             }
             val used = o.memTotal - o.memAvailable
-            UsageBar("Arbeitsspeicher", used, o.memTotal, "${formatBytes(used)} / ${formatBytes(o.memTotal)}", n++)
+            UsageBar("Arbeitsspeicher", used, o.memTotal, "${formatBytes(used)} / ${formatBytes(o.memTotal)}", n++, ChartMem, true)
             if (o.swapTotal > 0) {
                 val su = o.swapTotal - o.swapFree
-                UsageBar("Swap", su, o.swapTotal, "${formatBytes(su)} / ${formatBytes(o.swapTotal)}", n++)
+                UsageBar("Swap", su, o.swapTotal, "${formatBytes(su)} / ${formatBytes(o.swapTotal)}", n++, ChartMem, true)
             }
             UsageBar("Festplatten-I/O", (o.disk.busy * 10).toLong(), 1000,
-                "${o.disk.busy.roundToInt()} % · ↓ ${formatBytes(o.disk.read.toLong())}/s ↑ ${formatBytes(o.disk.write.toLong())}/s", n++)
-        }
-        }
+                "↓ ${formatBytes(o.disk.read.toLong())}/s ↑ ${formatBytes(o.disk.write.toLong())}/s", n++, ChartIn, true)
+            // network: relative to the highest rate of the period
+            val netNow = o.net.rx + o.net.tx
+            val netPeak = (hist?.points?.maxOfOrNull { it.netRx + it.netTx } ?: 0.0).coerceAtLeast(netNow).coerceAtLeast(1.0)
+            UsageBar("Netzwerk", (netNow * 1000 / netPeak).toLong(), 1000,
+                "↓ ${formatBytes(o.net.rx.toLong())}/s ↑ ${formatBytes(o.net.tx.toLong())}/s", n++, ChartNetIn, true)
+            hist?.let { h ->
+                val pts = h.points
+                val cap = pts.size.coerceAtLeast(2)
+                val pct = { v: Double -> "${v.roundToInt()} %" }
+                val rate = { v: Double -> "${formatBytes(v.toLong())}/s" }
+                val span = if (h.spanSeconds > 0) formatDuration(h.spanSeconds.toLong()) else ""
+                SectionCard("Auslastungsverlauf" + if (span.isNotBlank()) " (letzte $span)" else "", stateKey = "Auslastungsverlauf") {
+                    ChartBlock("CPU", "${o.cpuPercent.roundToInt()} %", listOf(ChartSeries(pts.map { it.cpu }, ChartCpu, fill = true)), cap, index = 0, scale = pct)
+                    ChartBlock("Arbeitsspeicher", "${pts.lastOrNull()?.mem?.roundToInt() ?: 0} %", listOf(ChartSeries(pts.map { it.mem }, ChartMem, fill = true)), cap, index = 1, scale = pct)
+                    ChartBlock("Festplatten  (lesen / schreiben)", "↓ ${formatBytes(o.disk.read.toLong())}/s  ↑ ${formatBytes(o.disk.write.toLong())}/s",
+                        listOf(ChartSeries(pts.map { it.diskRead }, ChartIn, fill = true), ChartSeries(pts.map { it.diskWrite }, ChartOut, fill = true)), cap, index = 2, scale = rate)
+                    ChartBlock("Netzwerk  (empfangen / senden)", "↓ ${formatBytes(o.net.rx.toLong())}/s  ↑ ${formatBytes(o.net.tx.toLong())}/s",
+                        listOf(ChartSeries(pts.map { it.netRx }, ChartNetIn, fill = true), ChartSeries(pts.map { it.netTx }, ChartOut, fill = true)), cap, index = 3, scale = rate)
+                }
+            }
+        } }
         card("Laufwerke") { drives?.takeIf { it.arr.isNotEmpty() }?.let { list ->
             SectionCard("Laufwerke") {
                 list.arr.forEachIndexed { i, e -> DriveRow(e, i, compact = true) { goTo(app.servercontrol.SystemTab.STORAGE) } }
             }
         }
         }
-        card("Verlauf") { hist?.let { h ->
-            val pts = h.points
-            val cap = pts.size.coerceAtLeast(2)
-            val pct = { v: Double -> "${v.roundToInt()} %" }
-            val rate = { v: Double -> "${formatBytes(v.toLong())}/s" }
-            val span = if (h.spanSeconds > 0) formatDuration(h.spanSeconds.toLong()) else ""
-            SectionCard("Verlauf" + if (span.isNotBlank()) " (letzte $span)" else "", stateKey = "Verlauf") {
-                ChartBlock("CPU", "${o.cpuPercent.roundToInt()} %", listOf(ChartSeries(pts.map { it.cpu }, ChartCpu, fill = true)), cap, index = 0, scale = pct)
-                ChartBlock("Arbeitsspeicher", "${pts.lastOrNull()?.mem?.roundToInt() ?: 0} %", listOf(ChartSeries(pts.map { it.mem }, ChartMem, fill = true)), cap, index = 1, scale = pct)
-                ChartBlock("Festplatten  (lesen / schreiben)", "↓ ${formatBytes(o.disk.read.toLong())}/s  ↑ ${formatBytes(o.disk.write.toLong())}/s",
-                    listOf(ChartSeries(pts.map { it.diskRead }, ChartIn, fill = true), ChartSeries(pts.map { it.diskWrite }, ChartOut, fill = true)), cap, index = 2, scale = rate)
-                ChartBlock("Netzwerk  (empfangen / senden)", "↓ ${formatBytes(o.net.rx.toLong())}/s  ↑ ${formatBytes(o.net.tx.toLong())}/s",
-                    listOf(ChartSeries(pts.map { it.netRx }, ChartNetIn, fill = true), ChartSeries(pts.map { it.netTx }, ChartOut, fill = true)), cap, index = 3, scale = rate)
-            }
-        } }
     }
     val o = ov
     when (popup) {
@@ -471,7 +477,7 @@ fun StorageScreen(api: ApiClient) {
                 }
             }
         }
-        card("Auto-Standby") { StandbyCard(api) }
+        card("Spindown") { StandbyCard(api) }
     }
 }
 
@@ -687,16 +693,27 @@ private val standbyTimes = listOf(0 to "nie", 300 to "5 min", 600 to "10 min", 9
 
 private fun standbyLabel(s: Int) = standbyTimes.firstOrNull { it.first == s }?.second ?: if (s % 60 == 0) "${s / 60} min" else "$s s"
 
-/** Speicher → Auto-Standby: spin-down time of every HDD, managed by hd-idle */
+/** Speicher → Spindown: spin-down time of every HDD, managed by hd-idle; saved on every change */
 @Composable
 private fun StandbyCard(api: ApiClient) {
     val host = rememberActionHost { api }
+    val scope = rememberCoroutineScope()
     var tick by remember { mutableStateOf(0) }
-    SectionCard("Auto-Standby", actions = { RefreshButton { tick++ } }) {
+    var err by remember { mutableStateOf<String?>(null) }
+    SectionCard("Spindown", actions = { RefreshButton { tick++ } }) {
         Loader(tick, { api.getJson("/api/storage/standby") }) { d, _ ->
             val times = remember(d) {
                 androidx.compose.runtime.mutableStateMapOf<String, Int>().apply {
                     d["disks"].arr.forEach { e -> e["id"].str.takeIf { it.isNotBlank() }?.let { put(it, e["timeout"].long?.toInt() ?: 0) } }
+                }
+            }
+            fun save() {
+                val body = kotlinx.serialization.json.buildJsonObject {
+                    put("method", "hdidle")
+                    put("disks", kotlinx.serialization.json.buildJsonObject { times.forEach { (k, v) -> put(k, v) } })
+                }.toString()
+                scope.launch {
+                    err = runCatching { api.putRaw("/api/storage/standby", body); null }.getOrElse { it.message ?: "Speichern fehlgeschlagen" }
                 }
             }
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -704,36 +721,27 @@ private fun StandbyCard(api: ApiClient) {
                     Text("hd-idle ist nicht installiert.", color = StatusWarn, fontSize = TextSmall)
                     SmallButton("hd-idle installieren", { host.post("hd-idle installieren", "/api/storage/standby/install-hdidle", after = { tick++ }) })
                 }
+                err?.let { Text(it, color = StatusBad, fontSize = TextSmall) }
                 val disks = d["disks"].arr
                 if (disks.isEmpty()) Text("Keine HDDs gefunden.", fontSize = TextSmall)
                 disks.forEachIndexed { i, e ->
                     val id = e["id"].str
-                    val state = e["state"].str
                     var open by remember { mutableStateOf(false) }
                     Row(Modifier.fillMaxWidth().background(stripe(i)).padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            "${e["device"].str} • ${formatBytes(e["size"].long)} • ${if (state == "active") "aktiv" else if (state == "standby" || state == "sleeping") "Standby" else "–"}",
-                            Modifier.weight(1f), maxLines = 1, color = if (state == "active") StatusOk else MaterialTheme.colorScheme.onSurface,
-                        )
+                        Text("${e["device"].str} • ${formatBytes(e["size"].long)}", Modifier.weight(1f), maxLines = 1)
                         if (id.isNotBlank()) Box {
-                            TextButton(onClick = { open = true }) { Text(standbyLabel(times[id] ?: 0), maxLines = 1) }
+                            TextButton(onClick = { open = true }, enabled = d["hdidle"].bool == true) { Text(standbyLabel(times[id] ?: 0), maxLines = 1) }
                             DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-                                standbyTimes.forEach { (v, l) -> DropdownMenuItem(text = { Text(l) }, onClick = { open = false; times[id] = v }) }
+                                standbyTimes.forEach { (v, l) ->
+                                    DropdownMenuItem(text = { Text(l) }, onClick = { open = false; if (times[id] != v) { times[id] = v; save() } })
+                                }
                             }
                         }
-                        IconButton(onClick = { host.post("Schlafen legen", "/api/storage/standby/sleep", """{"device":${jsonString(e["device"].str)}}""", after = { tick++ }) }, enabled = state == "active") {
+                        IconButton(onClick = { host.post("Schlafen legen", "/api/storage/standby/sleep", """{"device":${jsonString(e["device"].str)}}""") }) {
                             Icon(Icons.Default.Bedtime, "Jetzt schlafen legen", Modifier.size(20.dp))
                         }
                     }
                 }
-                if (disks.isNotEmpty()) Button(onClick = {
-                    val body = kotlinx.serialization.json.buildJsonObject {
-                        put("method", "hdidle")
-                        put("disks", kotlinx.serialization.json.buildJsonObject { times.forEach { (k, v) -> put(k, v) } })
-                        put("disableUnits", kotlinx.serialization.json.buildJsonArray { })
-                    }.toString()
-                    host.run("Auto-Standby", { AppJson.parseToJsonElement(api.putRaw("/api/storage/standby", body))["stdout"].str }, after = { tick++ })
-                }, enabled = d["hdidle"].bool == true) { Text("Speichern") }
             }
         }
     }
