@@ -39,7 +39,7 @@ import app.servercontrol.ui.*
 private const val NC = "/api/nextcloud"
 
 @Composable
-fun NextcloudMain(api: ApiClient, mod: JsonElement, onSetupDone: () -> Unit) {
+fun NextcloudMain(api: ApiClient, mod: JsonElement?, onSetupDone: () -> Unit) {
     val host = rememberActionHost { api }
     var confirm by remember { mutableStateOf<Confirm?>(null) }
     val act = { title: String, action: String, body: String? -> host.post(title, "$NC/action/$action", body) }

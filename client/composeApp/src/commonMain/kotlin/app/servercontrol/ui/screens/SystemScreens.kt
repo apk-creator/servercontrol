@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Bedtime
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.ui.graphics.Color
 import kotlin.math.roundToInt
@@ -517,7 +518,7 @@ private fun DriveDetailScreen(api: ApiClient, dev: String, onClose: () -> Unit) 
     var tick by remember { mutableStateOf(0) }
     var smart by remember { mutableStateOf(false) }
     var dialog by remember { mutableStateOf<Pair<String, JsonElement>?>(null) } // action to partition/disk
-    val reload = { tick++ }
+    val reload: () -> Unit = { tick++ }
     Loader(tick, { api.getJson("/api/storage/drive?device=${enc(dev)}") }) { d, _ ->
         CardColumn("cards.drive") {
             card("Laufwerk") {

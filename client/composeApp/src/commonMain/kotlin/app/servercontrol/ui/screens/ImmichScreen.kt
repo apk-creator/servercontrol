@@ -44,7 +44,7 @@ private val jobNames = mapOf(
 )
 
 @Composable
-fun ImmichMain(api: ApiClient, mod: kotlinx.serialization.json.JsonElement, onSetupDone: () -> Unit) {
+fun ImmichMain(api: ApiClient, mod: kotlinx.serialization.json.JsonElement?, onSetupDone: () -> Unit) {
     val host = rememberActionHost { api }
     var confirm by remember { mutableStateOf<Confirm?>(null) }
     TabbedScreen("tabs.immich", listOf("Status", "Aufträge", "Benutzer", "Bibliotheken", "Einrichtung")) { tab ->
