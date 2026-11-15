@@ -26,4 +26,4 @@ echo "Agent läuft. Fingerprint zum Vergleich in der App:"
 echo
 echo "Version: $(/usr/local/bin/servercontrol-agent -version)"
 echo "Hinweis: Port 8443 muss in der Firewall für das LAN offen sein, z. B. in nftables:"
-echo "  ip saddr 192.168.178.0/24 tcp dport 8443 accept"
+echo "  ip saddr <eigenes LAN, z. B. 192.168.1.0/24> tcp dport 8443 accept"

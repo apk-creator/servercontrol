@@ -53,7 +53,7 @@ class ConnectionManager {
             }
             Probe.Unreachable -> {
                 close()
-                throw ConnectException("Agent unter $url nicht erreichbar. Von unterwegs vorher das VPN der Fritzbox verbinden.")
+                throw ConnectException("Agent unter $url nicht erreichbar. Von unterwegs vorher das VPN ins Heimnetz verbinden.")
             }
             Probe.Ok -> {}
         }

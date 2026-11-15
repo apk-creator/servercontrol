@@ -19,7 +19,7 @@ val AppJson = Json {
 data class ServerProfile(
     val id: String,
     val name: String,
-    /** Agent URL, e.g. https://192.168.178.179:8443 (from outside: connect the Fritzbox VPN first) */
+    /** Agent URL, e.g. https://192.168.1.10:8443 (from outside: connect the home VPN first) */
     val lanUrl: String,
     /** SHA-256 fingerprint of the agent certificate (pinned after first trust) */
     val certFingerprint: String = "",

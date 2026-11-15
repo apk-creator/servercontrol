@@ -190,8 +190,8 @@ fun ProfileEditor(state: AppState, initial: ServerProfile, onDone: () -> Unit) {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(p.name, { p = p.copy(name = it) }, label = { Text("Name") }, singleLine = true)
                 OutlinedTextField(p.lanUrl, { p = p.copy(lanUrl = it.trim()) }, label = { Text("Adresse des Agenten") },
-                    placeholder = { Text("https://192.168.178.179:8443") }, singleLine = true,
-                    supportingText = { Text("Von unterwegs vorher das VPN der Fritzbox verbinden.") })
+                    placeholder = { Text("https://192.168.1.10:8443") }, singleLine = true,
+                    supportingText = { Text("Von unterwegs vorher das VPN ins Heimnetz verbinden.") })
                 Text(
                     if (p.certFingerprint.isBlank()) "Zertifikat: wird bei der ersten Verbindung bestätigt."
                     else "Zertifikat: ${p.certFingerprint.take(23)}…",

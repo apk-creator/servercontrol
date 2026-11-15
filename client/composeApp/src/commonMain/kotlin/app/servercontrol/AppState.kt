@@ -344,7 +344,8 @@ class AppState(
             upsert(updated)
             agentMissing = null
             if (kv["FIREWALL"] == "closed") {
-                say("Die Firewall lässt Port 8443 noch nicht durch. Im LAN freigeben, z. B.:\nsudo nft add rule inet <tabelle> input ip saddr 192.168.178.0/24 tcp dport 8443 accept")
+                val lan = Regex("""^(\d+\.\d+\.\d+)\.\d+$""").find(host)?.groupValues?.get(1)?.let { "$it.0/24" } ?: "<LAN>/24"
+                say("Die Firewall lässt Port 8443 noch nicht durch. Im LAN freigeben, z. B.:\nsudo nft add rule inet <tabelle> input ip saddr $lan tcp dport 8443 accept")
             }
             if (kv["EXISTING"] == "1") {
                 say("Der Agent war schon eingerichtet – bitte mit dem bisherigen Agent-Passwort anmelden.")

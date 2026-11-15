@@ -205,7 +205,7 @@ fun SshKeysScreen(state: AppState, session: Session) {
             title = { Text("Öffentlichen Schlüssel hinzufügen") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Inhalt der .pub-Datei, z. B. „ssh-ed25519 AAAA… felix@pc“", fontSize = TextSmall)
+                    Text("Inhalt der .pub-Datei, z. B. „ssh-ed25519 AAAA… name@pc“", fontSize = TextSmall)
                     OutlinedTextField(text, { text = it }, Modifier.fillMaxWidth(), minLines = 3, maxLines = 6)
                 }
             },

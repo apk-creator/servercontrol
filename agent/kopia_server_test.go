@@ -28,7 +28,7 @@ func TestKopiaServerClient(t *testing.T) {
 	}
 	mux.HandleFunc("/api/v1/sources", func(w http.ResponseWriter, r *http.Request) {
 		if check(w, r) {
-			w.Write([]byte(`{"sources":[{"source":{"host":"see-server","userName":"root","path":"/srv/a"}}]}`))
+			w.Write([]byte(`{"sources":[{"source":{"host":"server1","userName":"root","path":"/srv/a"}}]}`))
 		}
 	})
 	mux.HandleFunc("/api/v1/snapshots", func(w http.ResponseWriter, r *http.Request) {
