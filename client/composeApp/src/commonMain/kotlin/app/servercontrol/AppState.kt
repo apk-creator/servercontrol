@@ -320,10 +320,10 @@ class AppState(
             val known = trustedHostKey ?: profile.sshHostKey
             say("Verbinde per SSH mit $sshUser@$host …")
             val auth = SshAuth(sshUser, sshPassword.ifBlank { null }, profile.sshPrivateKey.ifBlank { null }, null)
-            val files = mutableMapOf("servercontrol-agent.tar.gz" to pkg, "pw" to agentPassword.encodeToByteArray())
+            val files = mutableMapOf("agent.tar" to pkg, "pw" to agentPassword.encodeToByteArray())
             if (addKey && profile.sshPublicKey.isNotBlank()) files["pubkey"] = (profile.sshPublicKey.trim() + "\n").encodeToByteArray()
             say("Lade Agent ${APP_VERSION} hoch und installiere ihn …")
-            val script = "set -e\ncd \"\$(dirname \"\$0\")\"\ntar -xzf servercontrol-agent.tar.gz\nexec sh ./install-remote.sh\n"
+            val script = "set -e\ncd \"\$(dirname \"\$0\")\"\ntar -xf agent.tar\nexec sh ./install-remote.sh\n"
             val (code, out) = try {
                 sshSudoScript(host, profile.sshPort, auth, known, sudoPassword.ifBlank { sshPassword }.ifBlank { null }, files, script)
             } catch (e: SshHostKeyUnknown) {
