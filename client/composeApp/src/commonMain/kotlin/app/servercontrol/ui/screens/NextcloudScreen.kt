@@ -368,7 +368,7 @@ private fun NcDbBackup(api: ApiClient, host: ActionHost) {
 }
 
 @Composable
-private fun NcDbBackupDialog(api: ApiClient, c: JsonElement, host: ActionHost, onDone: () -> Unit, onDismiss: () -> Unit) {
+private fun NcDbBackupDialog(api: ApiClient, c: JsonElement?, host: ActionHost, onDone: () -> Unit, onDismiss: () -> Unit) {
     var enabled by remember { mutableStateOf(c["enabled"].bool ?: true) }
     var time by remember { mutableStateOf(c["time"].str.ifBlank { "00:45" }) }
     var keep by remember { mutableStateOf((c["keep"].long ?: 3).toString()) }
