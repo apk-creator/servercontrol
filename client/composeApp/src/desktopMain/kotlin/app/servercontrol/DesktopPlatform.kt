@@ -58,6 +58,7 @@ val osName: String = System.getProperty("os.name").lowercase()
 val isWindows = osName.contains("win")
 
 // Windows: the system UI font (Compose's fallback font looks odd there)
+@OptIn(androidx.compose.ui.text.ExperimentalTextApi::class)
 actual val appFontFamily: androidx.compose.ui.text.font.FontFamily? = if (isWindows) androidx.compose.ui.text.font.FontFamily(
     androidx.compose.ui.text.platform.SystemFont("Segoe UI", androidx.compose.ui.text.font.FontWeight.Normal),
     androidx.compose.ui.text.platform.SystemFont("Segoe UI Semibold", androidx.compose.ui.text.font.FontWeight.SemiBold),
