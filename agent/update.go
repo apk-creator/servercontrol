@@ -62,7 +62,7 @@ func (s *Server) ghRequest(ctx context.Context, url, accept string) (*http.Respo
 }
 
 func (s *Server) latestRelease(ctx context.Context) (*ghRelease, error) {
-	repo := s.cfg.Get().Update.Repo
+	repo := releaseRepo // fixed: the public repository of the project
 	if !repoRe.MatchString(repo) {
 		return nil, errors.New("ungültiges Repository (owner/name)")
 	}
@@ -216,6 +216,9 @@ func (s *Server) downloadAndInstall(ctx context.Context) (map[string]any, error)
 	return installBinary(ctx, data)
 }
 
+// releaseRepo: where app and agent releases come from (no longer configurable)
+const releaseRepo = "apk-creator/servercontrol"
+
 // verifyDigest checks the download against the SHA-256 that GitHub publishes for the asset.
 func verifyDigest(data []byte, digest string) error {
 	want, ok := strings.CutPrefix(digest, "sha256:")
@@ -309,37 +312,6 @@ func installBinary(ctx context.Context, data []byte) (map[string]any, error) {
 		msg = "Installiert, aber Neustart fehlgeschlagen – bitte 'systemctl restart servercontrol-agent' ausführen. " + strings.TrimSpace(restart.Stderr)
 	}
 	return map[string]any{"ok": true, "oldVersion": version, "newVersion": newVer, "message": msg}, nil
-}
-
-func (s *Server) handleUpdateConfigSave(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Repo       string `json:"repo"`
-		Token      string `json:"token"`
-		ClearToken bool   `json:"clearToken"`
-	}
-	if err := readJSON(r, &req); err != nil {
-		writeErr(w, 400, err.Error())
-		return
-	}
-	if !repoRe.MatchString(req.Repo) {
-		writeErr(w, 400, "Repository im Format owner/name angeben")
-		return
-	}
-	c := s.cfg.Get()
-	switch {
-	case req.ClearToken:
-		_ = os.Remove(c.Update.TokenFile)
-	case strings.TrimSpace(req.Token) != "":
-		if err := writeSecret(c.Update.TokenFile, strings.TrimSpace(req.Token)); err != nil {
-			writeErr(w, 500, err.Error())
-			return
-		}
-	}
-	if err := s.cfg.Update(func(c *Config) error { c.Update.Repo = req.Repo; return nil }); err != nil {
-		writeErr(w, 500, err.Error())
-		return
-	}
-	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
 // App files the agent may hand out to the app (downloaded from the release with the server's token).

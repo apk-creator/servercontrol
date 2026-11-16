@@ -168,8 +168,6 @@ fun AgentScreen(state: app.servercontrol.AppState, api: ApiClient) {
     var check by remember { mutableStateOf<JsonElement?>(null) }
     var checking by remember { mutableStateOf(false) }
     Loader(host.result == null, { api.getJson("/api/config") }) { cfg, reload ->
-        var repo by remember(cfg) { mutableStateOf(cfg["update"]["repo"].str) }
-        var token by remember(cfg) { mutableStateOf("") }
         CardColumn("cards.agent") {
             card("Agent") { SectionCard("Agent", actions = { RefreshButton(reload) }) {
                 KeyValues(
@@ -183,20 +181,6 @@ fun AgentScreen(state: app.servercontrol.AppState, api: ApiClient) {
             } }
             card("Geräte") { DevicesCard(api) }
             card("Aufgaben") { JobsCard(api) }
-            card("Update-Quelle") { SectionCard("Update-Quelle") {
-                OutlinedTextField(repo, { repo = it.trim() }, Modifier.fillMaxWidth(), label = { Text("Repository (owner/name)") }, singleLine = true)
-                SecretField(token, { token = it }, if (cfg["update"]["hasToken"].bool == true) "GitHub-Token (leer = behalten)" else "GitHub-Token")
-                ButtonRow {
-                    Button(onClick = {
-                        val b = buildJsonObject { put("repo", repo); put("token", token) }.toString()
-                        host.run("Update-Quelle", { api.putRaw("/api/config/update", b); token = ""; "Gespeichert." }, reload)
-                    }) { Text("Speichern") }
-                    if (cfg["update"]["hasToken"].bool == true) SmallButton("Token löschen", {
-                        val b = buildJsonObject { put("repo", repo); put("clearToken", true) }.toString()
-                        host.run("Update-Quelle", { api.putRaw("/api/config/update", b); "Token gelöscht." }, reload)
-                    })
-                }
-            } }
         }
     }
     ConfirmDialog(confirm) { confirm = null }

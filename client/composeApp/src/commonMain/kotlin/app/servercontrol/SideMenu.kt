@@ -54,20 +54,16 @@ private val ItemHeight = 40.dp
 private val ItemGap = 1.dp
 private val ItemShape = RoundedCornerShape(20.dp)
 
+/** key of the side menu order in [app.servercontrol.ui.UiOrder] */
+const val MENU_ORDER_KEY = "menu"
+
 /**
  * Side menu that is only as wide as its entries need.
- * Long-press an entry and drag it: the other entries slide aside, the order is saved on release.
+ * Long-press an entry and drag it (same mechanism as the cards); the order is saved on release.
  */
 @Composable
 fun SideMenu(state: AppState, sections: List<Section>, onSelect: (Section) -> Unit) {
-    var items by remember(sections) { mutableStateOf(sections) }
-    var dragIndex by remember { mutableIntStateOf(-1) }
-    var dragOffset by remember { mutableFloatStateOf(0f) }
-    val step = with(LocalDensity.current) { (ItemHeight + ItemGap).toPx() }
     val colors = MaterialTheme.colorScheme
-    val dragging = dragIndex >= 0
-    val target = if (dragging) (dragIndex + (dragOffset / step).roundToInt()).coerceIn(0, items.lastIndex) else -1
-
     Surface(
         Modifier.fillMaxHeight().width(IntrinsicSize.Max),
         color = colors.surfaceContainerHigh,
@@ -76,66 +72,18 @@ fun SideMenu(state: AppState, sections: List<Section>, onSelect: (Section) -> Un
     ) {
         // stay clear of the status bar / navigation bar (Android draws edge-to-edge)
         Column(Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Vertical + WindowInsetsSides.Start))) {
-        Column(
-            Modifier
-                .weight(1f)
-                .verticalScroll(rememberScrollState(), enabled = !dragging)
-                .padding(horizontal = 6.dp, vertical = 6.dp),
-            verticalArrangement = Arrangement.spacedBy(ItemGap),
-        ) {
-            items.forEachIndexed { i, s ->
-                key(s) {
-                    val isDragged = i == dragIndex
-                    // neighbours make room for the dragged entry; snap back without animation after the drop
-                    val shift = when {
-                        !dragging || isDragged -> 0f
-                        i in (dragIndex + 1)..target -> -step
-                        i in target until dragIndex -> step
-                        else -> 0f
-                    }
-                    val animatedShift by animateFloatAsState(shift, if (dragging) spring(stiffness = 600f) else snap(), label = "menuShift")
+        app.servercontrol.ui.CardColumn(MENU_ORDER_KEY, Modifier.weight(1f).fillMaxWidth().padding(horizontal = 6.dp, vertical = 3.dp)) {
+            sections.forEach { s ->
+                card(s.name) {
                     Row(
                         Modifier
+                            .padding(vertical = ItemGap / 2)
                             .fillMaxWidth()
                             .height(ItemHeight)
-                            .zIndex(if (isDragged) 1f else 0f)
-                            .graphicsLayer {
-                                translationY = if (isDragged) dragOffset.coerceIn(-i * step, (items.lastIndex - i) * step) else animatedShift
-                                shadowElevation = if (isDragged) 6.dp.toPx() else 0f
-                                scaleX = if (isDragged) 1.03f else 1f
-                                scaleY = if (isDragged) 1.03f else 1f
-                                shape = ItemShape
-                                clip = true
-                            }
-                            .background(
-                                when {
-                                    isDragged -> colors.surfaceContainerHighest
-                                    state.section == s -> colors.secondaryContainer
-                                    else -> Color.Transparent
-                                },
-                                ItemShape,
-                            )
-                            .pointerInput(s) {
-                                detectDragGesturesAfterLongPress(
-                                    onDragStart = { dragIndex = items.indexOf(s); dragOffset = 0f },
-                                    onDragEnd = {
-                                        val from = dragIndex
-                                        val to = (from + (dragOffset / step).roundToInt()).coerceIn(0, items.lastIndex)
-                                        if (from >= 0 && to != from) {
-                                            items = items.toMutableList().apply { add(to, removeAt(from)) }
-                                            // hidden sections (modules not enabled) keep their place after the visible ones
-                                            state.setSectionOrder(items + state.orderedSections().filter { it !in items })
-                                        }
-                                        dragIndex = -1
-                                        dragOffset = 0f
-                                    },
-                                    onDragCancel = { dragIndex = -1; dragOffset = 0f },
-                                ) { change, amount ->
-                                    change.consume()
-                                    dragOffset += amount.y
-                                }
-                            }
-                            .clickable(enabled = !dragging) { onSelect(s) }
+                            .clip(ItemShape)
+                            .background(if (state.section == s) colors.secondaryContainer else colors.surfaceContainerHigh, ItemShape)
+                            .then(app.servercontrol.ui.LocalCardDragHandle.current)
+                            .clickable { onSelect(s) }
                             .padding(start = 12.dp, end = 16.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -159,7 +107,7 @@ fun SideMenu(state: AppState, sections: List<Section>, onSelect: (Section) -> Un
                 .fillMaxWidth()
                 .height(ItemHeight)
                 .clip(ItemShape)
-                .clickable(enabled = !dragging) { state.logout() }
+                .clickable { state.logout() }
                 .padding(start = 12.dp, end = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {

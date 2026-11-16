@@ -843,7 +843,6 @@ internal fun KopiaPrefsTab(api: ApiClient, base: String, host: ActionHost, tick:
         Column {
             SectionCard("Benachrichtigungen", stateKey = "kopia-notify", actions = {
                 AddButton({ edit = buildJsonObject { put("profile", ""); put("minSeverity", 0); put("method", buildJsonObject { put("type", "email"); put("config", JsonObject(emptyMap())) }) } }, "Profil anlegen")
-                RefreshButton { refresh++ }
             }) {
                 if (list.isEmpty()) Text("Keine Profile.", fontSize = TextSmall)
                 list.forEachIndexed { i, pr ->

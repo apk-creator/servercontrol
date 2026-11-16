@@ -93,8 +93,7 @@ fun helpFor(section: Section): List<Pair<String, String>> = when (section) {
     Section.AGENT -> listOf(
         "Agent" to "Versionen und verbundene Module. Updates stehen unter „Updates“.",
         "Angemeldete Geräte" to "Diese Geräte bleiben angemeldet, auch wenn die App lange im Hintergrund war. „Abmelden“ widerruft ein Gerät – ein verlorenes Handy sofort hier abmelden. „Abmelden“ im Seitenmenü entfernt das eigene Gerät.",
-        "Aufgaben" to "Länger laufende Aktionen aus der App (apt, Kopia, Nextcloud, Formatieren …) mit Ausgabe. Sie bleiben 24 Stunden sichtbar; ein Neustart des Agenten leert die Liste.",
-        "Update-Quelle" to "GitHub-Repository mit den Releases. Das Repository ist öffentlich, ein Token ist nicht nötig (nur bei einem privaten Fork: Fine-grained Token mit „Contents: Read-only“).",
+        "Aufgaben" to "Länger laufende Aktionen aus der App (apt, Kopia, Nextcloud, Formatieren …) mit Ausgabe. Sie bleiben 24 Stunden sichtbar; ein Neustart des Agenten leert die Liste."
     )
 }
 

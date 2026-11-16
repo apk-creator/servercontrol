@@ -112,7 +112,7 @@ class AppState(
     /** Side menu in the user's order (drag & drop); new sections are appended. */
     fun orderedSections(): List<Section> {
         val byName = Section.entries.associateBy { it.name }
-        val stored = vault.sectionOrder.mapNotNull { byName[it] }
+        val stored = (app.servercontrol.ui.UiOrder.orders[MENU_ORDER_KEY] ?: vault.sectionOrder).mapNotNull { byName[it] }
         return stored + Section.entries.filter { it !in stored }
     }
 
@@ -146,6 +146,8 @@ class AppState(
         vault = runCatching { AppJson.decodeFromString<ProfileVault>(plain) }.getOrElse { ProfileVault() }
         app.servercontrol.ui.UiOrder.orders.clear()
         app.servercontrol.ui.UiOrder.orders.putAll(vault.uiOrder)
+        // side menu order from older versions
+        if (MENU_ORDER_KEY !in vault.uiOrder && vault.sectionOrder.isNotEmpty()) app.servercontrol.ui.UiOrder.orders[MENU_ORDER_KEY] = vault.sectionOrder
         app.servercontrol.ui.UiOrder.onChange = { m -> scope.launch { vault = vault.copy(uiOrder = m); persist() } }
         // app (re)started, e.g. after Android ended the process in the background:
         // reconnect to the last server with the remembered device

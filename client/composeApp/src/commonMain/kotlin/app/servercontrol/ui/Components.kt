@@ -163,7 +163,7 @@ fun ErrorCard(msg: String, retry: (() -> Unit)? = null) {
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
     ) {
         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(msg, Modifier.weight(1f), color = MaterialTheme.colorScheme.onErrorContainer)
+            SelectionContainer(Modifier.weight(1f)) { Text(msg, color = MaterialTheme.colorScheme.onErrorContainer) }
             if (retry != null) IconButton(onClick = retry) { Icon(Icons.Default.Refresh, "Erneut") }
         }
     }
@@ -529,13 +529,14 @@ fun AppDialog(
             tonalElevation = 6.dp,
         ) {
             Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 6.dp)) {
+                // messages are selectable and copyable everywhere
                 title?.let {
-                    androidx.compose.material3.ProvideTextStyle(MaterialTheme.typography.titleLarge) { it() }
+                    SelectionContainer { androidx.compose.material3.ProvideTextStyle(MaterialTheme.typography.titleLarge) { it() } }
                     Spacer(Modifier.heightIn(min = 10.dp))
                 }
                 text?.let {
                     Box(Modifier.weight(1f, fill = false)) {
-                        androidx.compose.material3.ProvideTextStyle(MaterialTheme.typography.bodyMedium) { it() }
+                        SelectionContainer { androidx.compose.material3.ProvideTextStyle(MaterialTheme.typography.bodyMedium) { it() } }
                     }
                 }
                 Row(

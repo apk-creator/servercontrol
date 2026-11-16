@@ -416,8 +416,8 @@ fun LogsScreen(api: ApiClient) {
         }
         Loader(query to tick, { api.get<List<LogEntry>>("/api/system/logs?$query") }) { entries, _ ->
             if (entries.isEmpty()) Text("Keine Einträge.", Modifier.padding(16.dp))
-            // newest entries on top
-            LazyColumn(Modifier.fillMaxSize().padding(horizontal = 8.dp)) {
+            // newest entries on top; text selectable
+            androidx.compose.foundation.text.selection.SelectionContainer { LazyColumn(Modifier.fillMaxSize().padding(horizontal = 8.dp)) {
                 itemsIndexed(entries.sortedByDescending { it.time }) { i, e ->
                     val color = when (e.priority.toIntOrNull() ?: 6) { in 0..3 -> StatusBad; 4 -> StatusWarn; else -> MaterialTheme.colorScheme.onSurface }
                     Text(
@@ -426,7 +426,7 @@ fun LogsScreen(api: ApiClient) {
                         modifier = Modifier.fillMaxWidth().background(stripe(i)).padding(horizontal = 4.dp, vertical = 2.dp),
                     )
                 }
-            }
+            } }
         }
     }
 }
@@ -493,7 +493,8 @@ fun DriveRow(e: JsonElement, i: Int, compact: Boolean = false, onClick: () -> Un
     Column(Modifier.fillMaxWidth().background(stripe(i)).clickable(onClick = onClick).padding(horizontal = 4.dp, vertical = 4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                "${e["device"].str} • ${formatBytes(e["size"].long)} • ${stateLabel(state)}" + if (compact && total > 0) " • ${used * 100 / total} %" else "",
+                if (compact) "${e["name"].str} • ${formatBytes(e["size"].long)}" + (if (total > 0) " | ${used * 100 / total} %" else "") + " • ${stateLabel(state)}"
+                else "${e["device"].str} • ${formatBytes(e["size"].long)} • ${stateLabel(state)}",
                 Modifier.weight(1f), maxLines = 1,
                 color = if (state == "active") StatusOk else MaterialTheme.colorScheme.onSurface,
             )

@@ -20,6 +20,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -254,7 +256,14 @@ fun ReorderTabRow(orderKey: String, tabs: List<String>, selected: String, fixedL
                 }
             }
             if (fixedLast != null) Column(Modifier.clickable { onSelect(fixedLast) }, horizontalAlignment = Alignment.CenterHorizontally) {
-                TabLabel(fixedLast, fixedLast == selected)
+                if (fixedLast == "+") {
+                    // "+" as a large icon
+                    Box(Modifier.heightIn(min = 44.dp).padding(horizontal = 16.dp, vertical = 6.dp), contentAlignment = Alignment.Center) {
+                        androidx.compose.material3.Icon(androidx.compose.material.icons.Icons.Default.Add, "Hinzufügen", Modifier.size(32.dp),
+                            tint = if (fixedLast == selected) colors.onSurface else colors.onSurfaceVariant)
+                    }
+                    Box(Modifier.height(3.dp).fillMaxWidth().padding(horizontal = 12.dp).background(if (fixedLast == selected) colors.primary else colors.surface))
+                } else TabLabel(fixedLast, fixedLast == selected)
             }
         }
         HorizontalDivider()

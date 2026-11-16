@@ -209,7 +209,6 @@ func (s *Server) routes() http.Handler {
 	priv.HandleFunc("PUT /api/config/nextcloud", s.handleNcConfigSave)
 	priv.HandleFunc("POST /api/config/immich/test", s.handleImmichConfigTest)
 	priv.HandleFunc("PUT /api/config/immich", s.handleImmichConfigSave)
-	priv.HandleFunc("PUT /api/config/update", s.handleUpdateConfigSave)
 	// self-update
 	priv.HandleFunc("GET /api/agent/update/check", s.handleUpdateCheck)
 	priv.HandleFunc("POST /api/agent/update/install", s.handleUpdateInstall)
