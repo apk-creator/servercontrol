@@ -9,7 +9,7 @@ plugins {
 }
 
 // release tags have two parts (v1.8); installers need MAJOR.MINOR.PATCH
-val appVersion = "1.18"
+val appVersion = "1.19"
 val ktor = "3.1.3"
 
 // APP_VERSION constant for the in-app updater

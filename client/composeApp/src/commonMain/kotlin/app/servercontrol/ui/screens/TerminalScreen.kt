@@ -91,10 +91,7 @@ private fun TerminalRunning(state: AppState) {
                 IconButton(onClick = { font = (font + 1f).coerceAtMost(28f) }) { Icon(Icons.Default.Add, "Schrift größer") }
             }
             IconButton(onClick = { clipboard.getText()?.text?.let { term.paste(it) } }) { Icon(Icons.Default.ContentPaste, "Einfügen") }
-            IconButton(onClick = {
-                clipboard.setText(AnnotatedString(term.backend.copyText()))
-                copied = true
-            }) { Icon(Icons.Default.ContentCopy, "Kopieren (Auswahl, sonst Bildschirm)") }
+            // copying only from a selection (⋮ menu / bar at the selection), never the whole screen
             IconButton(onClick = { term.backend.clear() }) { Icon(Icons.Default.Delete, "Terminal leeren") }
             IconButton(onClick = { term.close() }) { Icon(Icons.Default.LinkOff, "Trennen") }
         }

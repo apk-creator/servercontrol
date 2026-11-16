@@ -34,6 +34,10 @@ import app.servercontrol.ButtonRow
 import app.servercontrol.CredentialFields
 import app.servercontrol.SmallButton
 import app.servercontrol.net.ApiClient
+import app.servercontrol.data.AppJson
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.filled.Settings
 import app.servercontrol.ui.*
 
 private const val NC = "/api/nextcloud"
@@ -51,6 +55,7 @@ fun NextcloudMain(api: ApiClient, mod: JsonElement?, onSetupDone: () -> Unit) {
             "Einrichtung" -> NextcloudSetup(api, mod, onSetupDone)
             "Wartung" -> CardColumn("cards.nc.wartung") {
                 card("Wartungsfenster") { NcMaintenanceWindow(api, host) }
+                card("Datenbank-Backup") { NcDbBackup(api, host) }
                 card("Datenbank") { SectionCard("Datenbank") {
                     ButtonRow {
                         SmallButton("Fehlende Indizes", { act("Fehlende Indizes", "add-missing-indices", null) })
@@ -316,4 +321,86 @@ fun NextcloudScreen(api: ApiClient) {
             NextcloudMain(api, mod) { refresh++ }
         }
     }
+}
+
+
+/** Nextcloud → Wartung → Datenbank-Backup: nightly dump by a systemd timer, "Jetzt sichern", settings */
+@Composable
+private fun NcDbBackup(api: ApiClient, host: ActionHost) {
+    var tick by remember { mutableStateOf(0) }
+    var edit by remember { mutableStateOf(false) }
+    SectionCard("Datenbank-Backup", actions = {
+        RefreshButton { tick++ }
+        IconButton(onClick = { edit = true }) {
+            androidx.compose.material3.Icon(androidx.compose.material.icons.Icons.Default.Settings, "Einstellungen", Modifier.size(20.dp))
+        }
+    }) {
+        Loader(tick, { api.getJson("/api/nextcloud/dbbackup") }) { d, _ ->
+            val c = d["config"]
+            val files = d["files"].arr
+            val on = d["timerEnabled"].bool == true
+            var i = 0
+            if (d["dbtype"].str.isNotBlank() && d["dbtype"].str != "mysql") Text("Nextcloud nutzt „${d["dbtype"].str}“ – das Backup gibt es nur für MariaDB/MySQL.", color = StatusWarn, fontSize = TextSmall)
+            if (d["stale"].bool == true) Text("Kein erfolgreiches Backup in den letzten 26 Stunden.", color = StatusBad)
+            KeyValue("Zeitplan", if (on) "täglich ${c["time"].str} Uhr" else "aus", i++, if (on) Color.Unspecified else StatusWarn)
+            d["nextRun"].long?.takeIf { it > 0 && on }?.let { KeyValue("Nächste Sicherung", formatTime(it).dropLast(3), i++) }
+            KeyValue("Letzte Sicherung", d["lastSuccess"].long?.takeIf { it > 0 }?.let { formatTime(it).dropLast(3) } ?: "noch keine", i++)
+            d["lastRun"].long?.takeIf { it > 0 }?.let {
+                val ok = d["lastResult"].str == "success"
+                KeyValue("Letzter Lauf", formatTime(it).dropLast(3) + if (ok) " ✓" else " ✗ (${d["lastResult"].str})", i++, if (ok) StatusOk else StatusBad)
+            }
+            KeyValue("Datenbank", d["database"].str.ifBlank { "–" }, i++)
+            KeyValue("Ordner", c["dir"].str, i++)
+            KeyValue("Aufbewahrt", "die letzten ${c["keep"].long ?: 3}", i++)
+            ButtonRow {
+                SmallButton("Jetzt sichern", { host.post("Datenbank sichern", "/api/nextcloud/dbbackup/run", after = { tick++ }) }, enabled = d["installed"].bool == true && d["running"].bool != true)
+            }
+            if (d["installed"].bool != true) Text("Noch nicht eingerichtet – über das Zahnrad einstellen und speichern.", fontSize = TextSmall)
+            files.forEachIndexed { n, f ->
+                Row(Modifier.fillMaxWidth().background(stripe(n)).padding(4.dp)) {
+                    Text(f["name"].str, Modifier.weight(1f), maxLines = 1, fontSize = TextSmall)
+                    Text(formatBytes(f["size"].long), fontSize = TextSmall)
+                }
+            }
+            if (edit) NcDbBackupDialog(api, c, host, onDone = { edit = false; tick++ }) { edit = false }
+        }
+    }
+}
+
+@Composable
+private fun NcDbBackupDialog(api: ApiClient, c: JsonElement, host: ActionHost, onDone: () -> Unit, onDismiss: () -> Unit) {
+    var enabled by remember { mutableStateOf(c["enabled"].bool ?: true) }
+    var time by remember { mutableStateOf(c["time"].str.ifBlank { "00:45" }) }
+    var keep by remember { mutableStateOf((c["keep"].long ?: 3).toString()) }
+    var dir by remember { mutableStateOf(c["dir"].str) }
+    val timeOk = Regex("""^([01]?\d|2[0-3]):[0-5]\d$""").matches(time)
+    val keepOk = keep.toIntOrNull()?.let { it in 1..30 } == true
+    AppDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Datenbank-Backup") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Täglich automatisch", Modifier.weight(1f))
+                    Switch(enabled, { enabled = it })
+                }
+                OutlinedTextField(time, { time = it.filter { ch -> ch.isDigit() || ch == ':' }.take(5) }, Modifier.fillMaxWidth(),
+                    label = { Text("Uhrzeit (vor den Kopia-Snapshots)") }, singleLine = true, isError = !timeOk)
+                OutlinedTextField(keep, { keep = it.filter(Char::isDigit).take(2) }, Modifier.fillMaxWidth(),
+                    label = { Text("Anzahl aufbewahrter Dumps") }, singleLine = true, isError = !keepOk)
+                OutlinedTextField(dir, { dir = it.trim() }, Modifier.fillMaxWidth(),
+                    label = { Text("Ordner (muss vom Kopia-Snapshot erfasst werden)") }, singleLine = true)
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = timeOk && keepOk && dir.startsWith("/"), onClick = {
+                val body = kotlinx.serialization.json.buildJsonObject {
+                    put("enabled", enabled); put("time", time.padStart(5, '0')); put("keep", keep.toInt()); put("dir", dir)
+                }.toString()
+                host.run("Datenbank-Backup", { AppJson.parseToJsonElement(api.putRaw("/api/nextcloud/dbbackup", body))["stdout"].str }, after = onDone)
+                onDismiss()
+            }) { Text("Speichern") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Abbrechen") } },
+    )
 }

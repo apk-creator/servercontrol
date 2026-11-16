@@ -84,6 +84,7 @@ fun helpFor(section: Section): List<Pair<String, String>> = when (section) {
         "Benutzer" to "Anlegen, sperren, löschen, Kontingent, Passwort, Dateien scannen.",
         "Apps" to "Apps aktivieren, deaktivieren und aktualisieren.",
         "Wartung" to "Wartungsfenster: Beginn in Ortszeit für aufwendige Hintergrundjobs (Aufräumen, Vorschaubilder); Nextcloud gibt 4 Stunden vor, alternativ jederzeit. Nextcloud speichert die Zeit in UTC, mit der Sommerzeit verschiebt sich die Ortszeit um eine Stunde. Außerdem Datenbank-Reparaturen, Dateiscan, Papierkorb und Versionen aufräumen, Modus der Hintergrundjobs.",
+        "Wartung → Datenbank-Backup" to "Ein systemd-Timer sichert die Nextcloud-Datenbank jede Nacht zur eingestellten Uhrzeit konsistent per mariadb-dump (ohne Wartungsmodus) und komprimiert sie; die letzten Dumps bleiben erhalten. Er läuft auch, wenn die App oder der Agent nicht läuft. Der Ordner muss im Kopia-Snapshot der Datenplatte liegen und die Uhrzeit vor den Snapshots. „Jetzt sichern“ z. B. vor einem Nextcloud-Update. Rot: seit 26 Stunden kein erfolgreiches Backup. Wiederherstellen bewusst nur per SSH: zstd -dc <datei> | sudo mariadb nextcloud (vorher Wartungsmodus an).",
         "Einrichtung" to "Pfad zu occ und Aufruf (z. B. sudo -u www-data php). Die Zugangsdaten bleiben auf dem Server.",
     )
     Section.IMMICH -> listOf(

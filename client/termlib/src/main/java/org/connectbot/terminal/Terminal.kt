@@ -1019,6 +1019,21 @@ internal fun TerminalWithAccessibility(
                 }
         }
 
+        // ServerControl: while the keyboard is open, keep the input line in view – also for
+        // wrapped command lines and password/input prompts, not only after a key press
+        LaunchedEffect(screenState, imeVisible) {
+            if (!imeVisible) return@LaunchedEffect
+            screenState.scrollToBottom()
+            scrollOffset.snapTo(0f)
+            snapshotFlow { Triple(screenState.snapshot.cursorRow, screenState.snapshot.rows, screenState.snapshot.scrollback.size) }
+                .collect {
+                    if (screenState.scrollbackPosition != 0 && !isUserScrolling) {
+                        screenState.scrollToBottom()
+                        scrollOffset.snapTo(0f)
+                    }
+                }
+        }
+
         // Sync scrollOffset when scrollbackPosition changes externally (but not during user scrolling)
         LaunchedEffect(screenState.scrollbackPosition) {
             val targetOffset = screenState.scrollbackPosition * baseCharHeight

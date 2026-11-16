@@ -54,3 +54,18 @@ func TestUntilClock(t *testing.T) {
 		t.Fatal("accepted 25:00")
 	}
 }
+
+func TestDBBackupScript(t *testing.T) {
+	s := dbBackupScriptText(dbBackupConf{Time: "00:45", Keep: 3, Dir: "/srv/nextcloud-data/db-backup"}, "nextcloud")
+	for _, want := range []string{`DIR="/srv/nextcloud-data/db-backup"`, "KEEP=3", "--single-transaction", `"nextcloud"`, "date +%Y-%m-%d_%H%M", "set -euo pipefail"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("missing %q in\n%s", want, s)
+		}
+	}
+	if !backupDirRe.MatchString("/srv/nextcloud-data/db-backup") || backupDirRe.MatchString("/etc/x") {
+		t.Fatal("backupDirRe")
+	}
+	if systemdTime("Mon 2026-11-16 00:45:03 CET") == 0 || systemdTime("n/a") != 0 {
+		t.Fatal("systemdTime")
+	}
+}
