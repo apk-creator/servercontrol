@@ -128,3 +128,15 @@ actual suspend fun generateSshKey(algo: SshKeyAlgo, bits: Int, comment: String):
     val fp = "SHA256:" + Base64.getEncoder().withoutPadding().encodeToString(MessageDigest.getInstance("SHA-256").digest(pubBlob))
     GeneratedSshKey(pem, pubLine, fp)
 }
+
+/** Public key line ("type base64 comment") and SHA256 fingerprint of an OpenSSH/PEM private key. */
+actual fun sshPublicKeyOf(privateKey: String, passphrase: String?): Pair<String, String>? = runCatching {
+    val kp = com.jcraft.jsch.KeyPair.load(com.jcraft.jsch.JSch(), privateKey.toByteArray(), null)
+    if (kp.isEncrypted && (passphrase.isNullOrEmpty() || !kp.decrypt(passphrase))) return null
+    val blob = kp.publicKeyBlob ?: return null
+    val type = String(blob, 4, ((blob[0].toInt() and 255) shl 24) or ((blob[1].toInt() and 255) shl 16) or ((blob[2].toInt() and 255) shl 8) or (blob[3].toInt() and 255), Charsets.US_ASCII)
+    val fp = "SHA256:" + Base64.getEncoder().withoutPadding().encodeToString(MessageDigest.getInstance("SHA-256").digest(blob))
+    val line = "$type ${Base64.getEncoder().encodeToString(blob)}" + (kp.publicKeyComment?.takeIf { it.isNotBlank() }?.let { " $it" } ?: "")
+    kp.dispose()
+    line to fp
+}.getOrNull()

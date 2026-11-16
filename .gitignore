@@ -20,3 +20,4 @@ client/composeApp/src/desktopMain/resources/agent/
 # signing keys never go into the repository
 *.keystore
 *.jks
+agent/agent

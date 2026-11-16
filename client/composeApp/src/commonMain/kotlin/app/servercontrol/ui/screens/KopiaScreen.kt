@@ -57,8 +57,8 @@ fun KopiaScreen(api: ApiClient) {
     var addMenu by remember { mutableStateOf(false) }
     var discover by remember { mutableStateOf(false) }
     var connect by remember { mutableStateOf(false) }
-    // scroll position per repository
-    val scrolls = remember { mutableMapOf<String, androidx.compose.foundation.ScrollState>() }
+    // one scroll position for all repositories (like the open/closed cards), so they are easy to compare
+    val sharedScroll = remember { androidx.compose.runtime.mutableIntStateOf(0) }
     Loader(refresh, { api.get<List<KopiaRepo>>("/api/kopia/repos", timeoutMs = 120_000) }) { repos, _ ->
         // one tab per repository (like the Nextcloud tabs), "+" always at the right end
         val byTab = repos.associateBy { r -> if (repos.count { it.name == r.name } > 1) "${r.name} (${r.id})" else r.name }
@@ -75,8 +75,7 @@ fun KopiaScreen(api: ApiClient) {
             val r = byTab[tab] ?: return@TabbedScreen
             key(r.id) {
                 if (!r.connected) r.error?.takeIf { it.isNotBlank() }?.let { ErrorCard(it.take(300)) }
-                val sc = scrolls.getOrPut(r.id) { androidx.compose.foundation.ScrollState(0) }
-                KopiaRepoPage(api, r, sc, onEditRepo = { edit = KopiaRepoDef(r.id, r.name, r.configFile, r.passwordFile, r.sources) })
+                KopiaRepoPage(api, r, sharedScroll, onEditRepo = { edit = KopiaRepoDef(r.id, r.name, r.configFile, r.passwordFile, r.sources) })
             }
         }
     }
@@ -248,7 +247,7 @@ private fun hoursOf(ns: Long?): String = ns?.let { n ->
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-internal fun KopiaRepoPage(api: ApiClient, repo: KopiaRepo, scroll: androidx.compose.foundation.ScrollState, onEditRepo: () -> Unit) {
+internal fun KopiaRepoPage(api: ApiClient, repo: KopiaRepo, sharedPos: androidx.compose.runtime.MutableIntState, onEditRepo: () -> Unit) {
     val host = rememberActionHost { api }
     var confirm by remember { mutableStateOf<Confirm?>(null) }
     var restore by remember { mutableStateOf<KopiaSnapshot?>(null) }
@@ -298,6 +297,9 @@ internal fun KopiaRepoPage(api: ApiClient, repo: KopiaRepo, scroll: androidx.com
             api.getJson("$base/status" + if (fresh) "?fresh=1" else "", 120_000)
         }, showSpinnerOnReload = false) { status, _ ->
             val viaServer = status["via"].str == "server"
+            // created when the content is there, so the shared position fits right away
+            val scroll = remember(repo.id) { androidx.compose.foundation.ScrollState(sharedPos.intValue) }
+            LaunchedEffect(scroll) { androidx.compose.runtime.snapshotFlow { scroll.value }.collect { sharedPos.intValue = it } }
             CardColumn("cards.kopia", scrollState = scroll) {
                 if (!viaServer) card("CLI") {
                     Column {

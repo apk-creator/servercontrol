@@ -100,10 +100,6 @@ fun OverviewScreen(api: ApiClient, goTo: (String) -> Unit) {
     } else CardColumn("cards.overview") {
         val o = o0
         // restart / shut down: two big fields
-        card("Energie") { Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            PowerTile("Neustart", Icons.Default.RestartAlt, Modifier.weight(1f)) { power = "reboot" }
-            PowerTile("Herunterfahren", Icons.Default.PowerSettingsNew, Modifier.weight(1f)) { power = "poweroff" }
-        } }
         card("Status") { Column {
         err?.let { ErrorCard(it) }
         o.scheduledPower?.takeIf { it.at > 0 }?.let { sp ->
@@ -122,7 +118,11 @@ fun OverviewScreen(api: ApiClient, goTo: (String) -> Unit) {
             }
         }
         } }
-        card("System") { SectionCard("System") {
+        card("System") { SectionCard("System", actions = {
+            // restart / shut down in the title row of "System"
+            IconButton(onClick = { power = "reboot" }) { Icon(Icons.Default.RestartAlt, "Neustart") }
+            IconButton(onClick = { power = "poweroff" }) { Icon(Icons.Default.PowerSettingsNew, "Herunterfahren") }
+        }) {
             var i = 0
             KeyValue("Hostname", o.hostname, i++)
             KeyValue("Betriebssystem", o.os, i++)

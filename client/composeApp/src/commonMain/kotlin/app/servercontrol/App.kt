@@ -50,7 +50,7 @@ import kotlinx.coroutines.launch
 import kotlin.random.Random
 
 // Monochrome design: black / grey / white. Only status indicators keep colour.
-private val MonoLight = lightColorScheme(
+internal val MonoLight = lightColorScheme(
     primary = Color(0xFF111111), onPrimary = Color.White,
     primaryContainer = Color(0xFFE0E0E0), onPrimaryContainer = Color(0xFF111111),
     inversePrimary = Color(0xFFDADADA),
@@ -70,7 +70,7 @@ private val MonoLight = lightColorScheme(
     surfaceContainerHighest = Color(0xFFE6E6E6),
 )
 
-private val MonoDark = darkColorScheme(
+internal val MonoDark = darkColorScheme(
     primary = Color(0xFFEDEDED), onPrimary = Color(0xFF111111),
     primaryContainer = Color(0xFF3A3A3A), onPrimaryContainer = Color.White,
     inversePrimary = Color(0xFF212121),
@@ -92,7 +92,13 @@ private val MonoDark = darkColorScheme(
 
 /** Only two font sizes in the whole app: big (text, titles, buttons) and small (details). */
 private val TwoSizeTypography: Typography = run {
-    val t = Typography()
+    val t = Typography().let { ty ->
+        val f = appFontFamily ?: return@let ty
+        fun ff(x: androidx.compose.ui.text.TextStyle) = x.copy(fontFamily = f)
+        Typography(ff(ty.displayLarge), ff(ty.displayMedium), ff(ty.displaySmall), ff(ty.headlineLarge), ff(ty.headlineMedium), ff(ty.headlineSmall),
+            ff(ty.titleLarge), ff(ty.titleMedium), ff(ty.titleSmall), ff(ty.bodyLarge), ff(ty.bodyMedium), ff(ty.bodySmall),
+            ff(ty.labelLarge), ff(ty.labelMedium), ff(ty.labelSmall))
+    }
     fun big(s: androidx.compose.ui.text.TextStyle) = s.copy(fontSize = app.servercontrol.ui.TextBig, lineHeight = app.servercontrol.ui.LineBig, letterSpacing = androidx.compose.ui.unit.TextUnit.Unspecified)
     fun small(s: androidx.compose.ui.text.TextStyle) = s.copy(fontSize = app.servercontrol.ui.TextSmall, lineHeight = app.servercontrol.ui.LineSmall)
     Typography(

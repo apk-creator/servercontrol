@@ -43,7 +43,7 @@ data class UpdateReport(
     /** e.g. ["App 1.9", "Nextcloud 34.0.6", "5 Systempakete"] */
     val summary: List<String>
         get() = listOfNotNull(
-            appLatest?.let { "App $it" },
+            appLatest?.let { (if (isDesktop) "Anwendung " else "App ") + it },
             agentLatest?.let { "Agent $it" },
             ncServer?.let { "Nextcloud $it" },
             ncApps.takeIf { it > 0 }?.let { "$it Nextcloud-App${if (it > 1) "s" else ""}" },

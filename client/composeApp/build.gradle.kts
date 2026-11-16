@@ -9,7 +9,7 @@ plugins {
 }
 
 // release tags have two parts (v1.8); installers need MAJOR.MINOR.PATCH
-val appVersion = "1.17"
+val appVersion = "1.18"
 val ktor = "3.1.3"
 
 // APP_VERSION constant for the in-app updater
@@ -59,6 +59,7 @@ kotlin {
                 implementation(compose.desktop.currentOs)
                 implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.10.2")
                 implementation(jsch)
+                implementation("net.java.dev.jna:jna:5.15.0") // Windows title bar colour (dwmapi)
             }
         }
     }
@@ -111,7 +112,7 @@ compose.desktop {
             packageVersion = if (appVersion.count { it == '.' } == 1) "$appVersion.0" else appVersion
             description = "ServerControl – Debian-Server-Verwaltung"
             vendor = "apk-creator"
-            modules("java.naming", "jdk.crypto.ec", "java.logging", "java.security.jgss")
+            modules("java.naming", "jdk.crypto.ec", "java.logging", "java.security.jgss", "jdk.unsupported")
             windows {
                 iconFile.set(project.file("icons/icon.ico"))
                 menu = true

@@ -78,6 +78,11 @@ fun main() = application {
                 !(state?.screen == Screen.Main && state?.section == Section.TERMINAL) && BackStack.handle()
         },
     ) {
+        val dark = androidx.compose.foundation.isSystemInDarkTheme()
+        androidx.compose.runtime.LaunchedEffect(dark) {
+            val cs = if (dark) MonoDark else MonoLight
+            TitleBar.apply(window, cs.background, cs.onBackground, dark)
+        }
         if (s == null) {
             UnlockScreen { pass ->
                 val store = DesktopSecureStore(pass)

@@ -47,6 +47,7 @@ import javax.net.ssl.SSLContext
 import javax.net.ssl.X509TrustManager
 
 actual val isDesktop: Boolean = false
+actual val appFontFamily: androidx.compose.ui.text.font.FontFamily? = null
 
 // ---------------- encrypted profile storage (Android Keystore, AES-256-GCM) ----------------
 

@@ -20,6 +20,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import app.servercontrol.APP_VERSION
+import app.servercontrol.isDesktop
 import app.servercontrol.AppState
 import app.servercontrol.Bold
 import app.servercontrol.ButtonRow
@@ -94,7 +95,7 @@ fun UpdatesScreen(state: AppState, api: ApiClient) {
 @Composable
 private fun AppUpdateCard(state: AppState, r: UpdateReport) {
     val progress = state.appUpdate
-    SectionCard("App") {
+    SectionCard(if (isDesktop) "Anwendung" else "App") {
         val latest = r.agent["latest"].str
         KeyValues("Installiert" to APP_VERSION, latest.takeIf { it.isNotBlank() }?.let { "Neueste" to it })
         when {

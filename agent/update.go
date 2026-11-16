@@ -53,11 +53,7 @@ func (s *Server) ghRequest(ctx context.Context, url, accept string) (*http.Respo
 	req.Header.Set("Accept", accept)
 	req.Header.Set("User-Agent", "servercontrol-agent/"+version)
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-	if b, err := os.ReadFile(s.cfg.Get().Update.TokenFile); err == nil {
-		if t := strings.TrimSpace(string(b)); t != "" {
-			req.Header.Set("Authorization", "Bearer "+t)
-		}
-	}
+	// the repository is public: no token (an old token of the private repo would be refused)
 	return ghClient.Do(req)
 }
 

@@ -111,9 +111,9 @@ fun pct(used: Long, total: Long): Float = if (total <= 0) 0f else (used.toFloat(
 
 /** The app uses exactly two font sizes. */
 val TextBig = 15.sp
-val TextSmall = 12.sp
+val TextSmall = if (app.servercontrol.isDesktop) 13.sp else 12.sp
 val LineBig = 20.sp
-val LineSmall = 16.sp
+val LineSmall = if (app.servercontrol.isDesktop) 17.sp else 16.sp
 
 val StatusOk = Color(0xFF2E7D32)
 val StatusWarn = Color(0xFFF9A825)
@@ -184,7 +184,7 @@ fun SectionCard(
     modifier: Modifier = Modifier,
     collapsible: Boolean = true,
     stateKey: String? = null,
-    initiallyCollapsed: Boolean = true,
+    initiallyCollapsed: Boolean = !app.servercontrol.isDesktop,
     actions: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {},
     content: @Composable ColumnScope.() -> Unit,
 ) {

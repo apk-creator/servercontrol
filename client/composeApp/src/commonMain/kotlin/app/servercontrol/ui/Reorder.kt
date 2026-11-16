@@ -259,7 +259,7 @@ fun ReorderTabRow(orderKey: String, tabs: List<String>, selected: String, fixedL
                 if (fixedLast == "+") {
                     // "+" as a large icon
                     Box(Modifier.heightIn(min = 44.dp).padding(horizontal = 16.dp, vertical = 6.dp), contentAlignment = Alignment.Center) {
-                        androidx.compose.material3.Icon(androidx.compose.material.icons.Icons.Default.Add, "Hinzufügen", Modifier.size(32.dp),
+                        androidx.compose.material3.Icon(androidx.compose.material.icons.Icons.Default.Add, "Hinzufügen", Modifier.size(24.dp),
                             tint = if (fixedLast == selected) colors.onSurface else colors.onSurfaceVariant)
                     }
                     Box(Modifier.height(3.dp).fillMaxWidth().padding(horizontal = 12.dp).background(if (fixedLast == selected) colors.primary else colors.surface))

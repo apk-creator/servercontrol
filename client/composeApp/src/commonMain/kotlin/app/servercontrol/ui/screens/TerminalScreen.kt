@@ -47,6 +47,8 @@ import app.servercontrol.Session
 import app.servercontrol.SshAuth
 import app.servercontrol.SshHostKeyUnknown
 import app.servercontrol.isDesktop
+import app.servercontrol.normalizeKey
+import app.servercontrol.sshPublicKeyOf
 import app.servercontrol.terminal.TerminalInputState
 import app.servercontrol.terminal.TerminalKeyBar
 import app.servercontrol.terminal.TerminalPane
@@ -123,7 +125,7 @@ private fun SshConnectForm(state: AppState, session: Session) {
         error = null
         scope.launch {
             val term = state.terminalSession()
-            val auth = SshAuth(user.trim(), password = null, privateKey = session.profile.sshPrivateKey, passphrase = passphrase.ifEmpty { null })
+            val auth = SshAuth(user.trim(), password = null, privateKey = normalizeKey(session.profile.sshPrivateKey), passphrase = passphrase.ifEmpty { null })
             val p = port.toIntOrNull() ?: 22
             try {
                 try {
@@ -141,7 +143,13 @@ private fun SshConnectForm(state: AppState, session: Session) {
                 if (np != session.profile) state.updateSessionProfile(np)
                 passphrase = ""
             } catch (e: Throwable) {
-                error = e.message ?: e.toString()
+                val msg = e.message ?: e.toString()
+                error = if (msg.contains("Auth", ignoreCase = true)) {
+                    val fp = session.profile.sshKeyFingerprint.ifBlank { sshPublicKeyOf(session.profile.sshPrivateKey, passphrase.ifEmpty { null })?.second ?: "" }
+                    "Anmeldung als „${user.trim()}“ abgelehnt. Der Schlüssel dieses Geräts" + (if (fp.isNotBlank()) " ($fp)" else "") +
+                        " ist für diesen Benutzer nicht auf dem Server eingetragen – unten unter „Eingetragene Schlüssel auf dem Server“ mit demselben Benutzer eintragen." +
+                        if (fp.isBlank()) " Der Schlüssel ließ sich nicht lesen (beschädigt eingefügt oder Passphrase nötig)." else ""
+                } else msg
             } finally {
                 busy = false
             }

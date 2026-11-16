@@ -24,6 +24,8 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.servercontrol.normalizeKey
+import app.servercontrol.sshPublicKeyOf
 import app.servercontrol.AppState
 import app.servercontrol.Bold
 import app.servercontrol.ButtonRow
@@ -230,7 +232,10 @@ fun SshKeysScreen(state: AppState, session: Session, top: app.servercontrol.ui.C
             },
             confirmButton = {
                 TextButton(enabled = text.contains("PRIVATE KEY"), onClick = {
-                    state.updateSessionProfile(session.profile.copy(sshPrivateKey = text.trim() + "\n", sshPublicKey = "", sshKeyFingerprint = ""))
+                    val key = normalizeKey(text)
+                    // public part + fingerprint, so the key is recognised on the server ("dieses Gerät")
+                    val pub = sshPublicKeyOf(key, null)
+                    state.updateSessionProfile(session.profile.copy(sshPrivateKey = key, sshPublicKey = pub?.first ?: "", sshKeyFingerprint = pub?.second ?: ""))
                     importKey = false
                 }) { Text("Übernehmen") }
             },

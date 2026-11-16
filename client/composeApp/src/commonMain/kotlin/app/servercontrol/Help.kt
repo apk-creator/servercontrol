@@ -39,7 +39,7 @@ private const val COMMON =
 /** What each menu can do – shown under "?" → Hinweis. */
 fun helpFor(section: Section): List<Pair<String, String>> = when (section) {
     Section.OVERVIEW -> listOf(
-        "Neustart / Herunterfahren" to "Sofort, in 1 oder in 5 Minuten. Ein geplanter Vorgang erscheint darunter und lässt sich abbrechen. Nach dem Herunterfahren geht Einschalten aus der Ferne nur per Wake-on-LAN.",
+        "Neustart / Herunterfahren" to "Die beiden Symbole in der Titelzeile von „System“: sofort, in 1 oder in 5 Minuten. Ein geplanter Vorgang erscheint darunter und lässt sich abbrechen. Nach dem Herunterfahren geht Einschalten aus der Ferne nur per Wake-on-LAN.",
         "System" to "Hostname, Betriebssystem, Kernel, CPU, Laufzeit und Temperaturen (min / Ø / max). Ein Tipp auf eine Temperaturzeile zeigt die einzelnen Sensoren. Schlafende Platten werden dafür nicht geweckt; für sie gilt der letzte gemessene Wert.",
         "Auslastung" to "CPU (Tipp: alle Kerne), Arbeitsspeicher, Swap, Festplatten-I/O und Netzwerk. Der Netzwerkbalken bezieht sich auf die höchste Rate im Verlauf. Darunter klappt der Auslastungsverlauf auf: alles seit dem Start des Agenten, höchstens 24 Stunden, skaliert auf den Bereich des Zeitraums (links Maximum, rechts Minimum).",
         "Laufwerke" to "Jedes Laufwerk in einer Zeile: Zustand (aktiv, idle, Standby), SMART-Status und Belegung. Grauer SMART-Status = letzter bekannter Wert, weil die Platte schläft. Tipp öffnet System → Speicher.",

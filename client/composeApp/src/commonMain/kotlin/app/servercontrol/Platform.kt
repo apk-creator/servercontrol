@@ -32,6 +32,9 @@ expect fun CredentialFields(
 
 expect val isDesktop: Boolean
 
+/** font of the UI (desktop: the system UI font of Windows); null = Compose default */
+expect val appFontFamily: androidx.compose.ui.text.font.FontFamily?
+
 // ---------------- SSH ----------------
 
 /** An interactive SSH shell (PTY). */
@@ -131,3 +134,10 @@ expect suspend fun installAppUpdate(
 
 /** Name under which this installation appears in the agent's device list. */
 expect val deviceName: String
+
+/** public key line + SHA256 fingerprint of a private key (null: unreadable or wrong passphrase) */
+expect fun sshPublicKeyOf(privateKey: String, passphrase: String?): Pair<String, String>?
+
+/** pasted keys: Windows line endings and stray spaces break the key parser */
+fun normalizeKey(text: String): String =
+    text.replace("\r\n", "\n").replace('\r', '\n').lines().map { it.trim() }.filter { it.isNotEmpty() }.joinToString("\n") + "\n"

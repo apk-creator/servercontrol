@@ -57,6 +57,13 @@ actual val isDesktop: Boolean = true
 val osName: String = System.getProperty("os.name").lowercase()
 val isWindows = osName.contains("win")
 
+// Windows: the system UI font (Compose's fallback font looks odd there)
+actual val appFontFamily: androidx.compose.ui.text.font.FontFamily? = if (isWindows) androidx.compose.ui.text.font.FontFamily(
+    androidx.compose.ui.text.platform.SystemFont("Segoe UI", androidx.compose.ui.text.font.FontWeight.Normal),
+    androidx.compose.ui.text.platform.SystemFont("Segoe UI Semibold", androidx.compose.ui.text.font.FontWeight.SemiBold),
+    androidx.compose.ui.text.platform.SystemFont("Segoe UI", androidx.compose.ui.text.font.FontWeight.Bold),
+) else null
+
 // ---------------- encrypted vault with master password (PBKDF2 + AES-256-GCM) ----------------
 
 class WrongPassphraseException : Exception("Falsches Master-Passwort")
