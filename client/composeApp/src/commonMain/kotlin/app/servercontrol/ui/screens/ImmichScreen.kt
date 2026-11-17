@@ -115,17 +115,18 @@ private fun ImmichJobs(api: ApiClient, host: ActionHost) {
                     api.putRaw("$IM/jobs/$name", """{"command":"$command","force":$force}""")
                     "Befehl „$command“ gesendet."
                 })
-            SectionCard(jobNames[name] ?: name) {
+            SectionCard(jobNames[name] ?: name, actions = {
+                GearMenu(buildList {
+                    add("Fehlende verarbeiten" to { cmd("start") })
+                    add("Alle verarbeiten" to { cmd("start", true) })
+                    if (paused) add("Fortsetzen" to { cmd("resume") }) else if (active || (c["waiting"].long ?: 0) > 0) add("Pausieren" to { cmd("pause") })
+                    if ((c["waiting"].long ?: 0) > 0) add("Warteschlange leeren" to { cmd("empty") })
+                    if ((c["failed"].long ?: 0) > 0) add("Fehler löschen" to { cmd("clear-failed") })
+                })
+            }) {
                 Text("aktiv ${c["active"].str} · wartend ${c["waiting"].str} · verzögert ${c["delayed"].str} · fehlgeschlagen ${c["failed"].str}" +
                     (if (paused) " · PAUSIERT" else ""), fontSize = TextSmall,
                     color = if ((c["failed"].long ?: 0) > 0) StatusWarn else MaterialTheme.colorScheme.onSurface)
-                ButtonRow {
-                    SmallButton("Fehlende", { cmd("start") })
-                    SmallButton("Alle", { cmd("start", true) })
-                    if (paused) SmallButton("Fortsetzen", { cmd("resume") }) else if (active || (c["waiting"].long ?: 0) > 0) SmallButton("Pausieren", { cmd("pause") })
-                    if ((c["waiting"].long ?: 0) > 0) SmallButton("Leeren", { cmd("empty") })
-                    if ((c["failed"].long ?: 0) > 0) SmallButton("Fehler löschen", { cmd("clear-failed") })
-                }
             }
         }
     }
@@ -219,10 +220,11 @@ private fun ImmichLibraries(api: ApiClient, host: ActionHost) {
             ListHeader("${libs.arr.size} externe Bibliotheken") { RefreshButton(reload) }
             if (libs.arr.isEmpty()) Text("Keine externen Bibliotheken.", Modifier.padding(16.dp))
             libs.arr.forEach { l ->
-                SectionCard(l["name"].str) {
+                SectionCard(l["name"].str, actions = {
+                    GearMenu(listOf("Jetzt scannen" to { host.post("Scan ${l["name"].str}", "$IM/libraries/${l["id"].str}/scan") }))
+                }) {
                     Text(l["importPaths"].arr.joinToString { it.str }, fontSize = TextSmall)
                     Text("${l["assetCount"].str} Dateien · zuletzt gescannt ${l["refreshedAt"].str.take(19).replace('T', ' ')}", fontSize = TextSmall, fontWeight = Bold)
-                    SmallButton("Jetzt scannen", { host.post("Scan ${l["name"].str}", "$IM/libraries/${l["id"].str}/scan") })
                 }
             }
         }

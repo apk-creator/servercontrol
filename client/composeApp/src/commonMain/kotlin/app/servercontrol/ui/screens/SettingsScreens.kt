@@ -208,7 +208,7 @@ private fun DevicesCard(api: ApiClient) {
                         Text(d["name"].str + if (d["current"].bool == true) "  (dieses Gerät)" else "", fontWeight = Bold, fontSize = TextSmall)
                         Text("zuletzt ${d["lastUsed"].str.take(10)} · seit ${d["created"].str.take(10)}", fontSize = TextSmall)
                     }
-                    if (d["current"].bool != true) SmallButton("Entfernen", { askRevoke = d["id"].str to d["name"].str })
+                    if (d["current"].bool != true) GearMenu(listOf("Abmelden …" to { askRevoke = d["id"].str to d["name"].str }))
                 }
             }
         }

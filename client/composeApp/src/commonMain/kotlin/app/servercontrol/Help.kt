@@ -33,7 +33,8 @@ import app.servercontrol.ui.TextSmall
 
 private const val COMMON =
     "Allgemein: Reiter und Karten lassen sich umordnen – lange auf den Reiter bzw. die Kartenüberschrift drücken und ziehen. " +
-        "Die Pfeile rechts klappen Karten ein und aus, das Kreissymbol lädt neu, das Zahnrad öffnet weitere Aktionen. " +
+        "Die Pfeile rechts klappen Karten ein und aus, das Zahnrad öffnet die Aktionen einer Karte oder eines Eintrags, „+“ legt etwas an. " +
+        "Neu laden: unter Android die Seite oben herunterziehen, am Desktop das Kreissymbol oben rechts – es lädt alle Karten der Seite. " +
         "Das Seitenmenü sortierst du genauso durch langes Drücken."
 
 /** What each menu can do – shown under "?" → Hinweis. */
@@ -74,7 +75,7 @@ fun helpFor(section: Section): List<Pair<String, String>> = when (section) {
         "Snapshots" to "Quellen mit letztem und nächstem Snapshot. Antippen öffnet den Verlauf mit Anheften, Beschreibung, Durchsuchen, Wiederherstellen und Löschen.",
         "Richtlinien" to "Alle Richtlinien wie in der Kopia-Weboberfläche: Aufbewahrung, Dateien, Fehlerbehandlung, Komprimierung, Zeitplan, Hochladen, Aktionen, Protokollierung. Leere Felder werden geerbt.",
         "Aufgaben" to "Laufende und letzte Aufgaben des Kopia-Servers mit Protokoll und Abbrechen.",
-        "Repository / Wartung" to "Pfad, Laufwerk und Belegung. „Zeitplan“ stellt Intervall und Uhrzeit der automatischen Wartung ein. Laufen die Wartungen über eigene Skripte (z. B. nach dem Snapshot), hier „aus“ lassen. Die Wartungsinfo wird zwischengespeichert, weil das Lesen die Platte weckt; „Neu lesen“ holt sie frisch.",
+        "Repository / Wartung" to "Pfad, Laufwerk und Belegung. „Zeitplan“ stellt Intervall und Uhrzeit der automatischen Wartung ein. Laufen die Wartungen über eigene Skripte (z. B. nach dem Snapshot), hier „aus“ lassen. Die Wartungsinfo wird zwischengespeichert, weil das Lesen die Platte weckt; beim Neuladen der Seite wird sie frisch gelesen. Das Zahnrad der Karte „Wartung“ stellt Intervall (in Tagen) und Uhrzeit ein.",
         "Server" to "Beschreibung des Repositorys. „Abgleichen“ liest neue Snapshots und Richtlinien aus dem Repository ein (z. B. nach Änderungen per Kommandozeile) und weckt dafür die Platte.",
         "Abfrage" to "Alle Daten kommen vom laufenden Kopia-Server, damit die Platten schlafen können. Ohne Server gibt es nur die Snapshot-Liste über die Kommandozeile (weckt die Platte).",
         "Benachrichtigungen" to "Profile (E-Mail, Pushover, Webhook), über die der Kopia-Server Snapshots, Wartung und Fehler meldet.",
@@ -83,7 +84,8 @@ fun helpFor(section: Section): List<Pair<String, String>> = when (section) {
         "Status" to "Version, Wartungsmodus, Systemprüfungen.",
         "Benutzer" to "Anlegen, sperren, löschen, Kontingent, Passwort, Dateien scannen.",
         "Apps" to "Apps aktivieren, deaktivieren und aktualisieren.",
-        "Wartung" to "Wartungsfenster: Beginn in Ortszeit für aufwendige Hintergrundjobs (Aufräumen, Vorschaubilder); Nextcloud gibt 4 Stunden vor, alternativ jederzeit. Nextcloud speichert die Zeit in UTC, mit der Sommerzeit verschiebt sich die Ortszeit um eine Stunde. Außerdem Datenbank-Reparaturen, Dateiscan, Papierkorb und Versionen aufräumen, Modus der Hintergrundjobs.",
+        "Wartung" to "Wartungsfenster: Beginn in Ortszeit, nur volle Stunden (Nextcloud kennt keine Minuten) für aufwendige Hintergrundjobs (Aufräumen, Vorschaubilder); Nextcloud gibt 4 Stunden vor, alternativ jederzeit. Nextcloud speichert die Zeit in UTC, mit der Sommerzeit verschiebt sich die Ortszeit um eine Stunde. Außerdem Datenbank-Reparaturen, Dateiscan, Papierkorb und Versionen aufräumen, Modus der Hintergrundjobs.",
+        "Wartung → Protokoll" to "Die neuesten Einträge aus nextcloud.log zuerst, wahlweise nur Warnungen oder Fehler. Text lässt sich markieren und kopieren.",
         "Wartung → Datenbank-Backup" to "Ein systemd-Timer sichert die Nextcloud-Datenbank jede Nacht zur eingestellten Uhrzeit konsistent per mariadb-dump (ohne Wartungsmodus) und komprimiert sie; die letzten Dumps bleiben erhalten. Er läuft auch, wenn die App oder der Agent nicht läuft. Der Ordner muss im Kopia-Snapshot der Datenplatte liegen und die Uhrzeit vor den Snapshots. „Jetzt sichern“ z. B. vor einem Nextcloud-Update. Rot: seit 26 Stunden kein erfolgreiches Backup. Wiederherstellen bewusst nur per SSH: zstd -dc <datei> | sudo mariadb nextcloud (vorher Wartungsmodus an).",
         "Einrichtung" to "Pfad zu occ und Aufruf (z. B. sudo -u www-data php). Die Zugangsdaten bleiben auf dem Server.",
     )

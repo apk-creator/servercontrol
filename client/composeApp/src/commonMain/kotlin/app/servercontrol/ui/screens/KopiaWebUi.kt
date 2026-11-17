@@ -122,11 +122,12 @@ private fun kDuration(a: String, b: String): String {
 // ---------------- Snapshots tab ----------------
 
 @Composable
-internal fun KopiaSnapshotsTab(api: ApiClient, base: String, host: ActionHost, tick: Int, onRestore: (KopiaSnapshot) -> Unit, onPolicy: (KopiaTarget) -> Unit, onOpenSource: (KopiaTarget) -> Unit) {
+internal fun KopiaSnapshotsTab(api: ApiClient, base: String, host: ActionHost, tick: Int, onRestore: (KopiaSnapshot) -> Unit, onPolicy: (KopiaTarget) -> Unit, onOpenSource: (KopiaTarget) -> Unit, addState: androidx.compose.runtime.MutableState<Boolean>? = null) {
     var openSource by remember { mutableStateOf<KopiaTarget?>(null) }
     // the snapshot history opens as its own page (see KopiaRepoDetail)
     LaunchedEffect(openSource) { openSource?.let { onOpenSource(it); openSource = null } }
-    var newSnap by remember { mutableStateOf(false) }
+    // "+" in the title row of the card (KopiaRepoPage) sets this state
+    var newSnap by (addState ?: remember { mutableStateOf(false) })
     var srcMenu by remember { mutableStateOf<JsonElement?>(null) }
     var refresh by remember { mutableStateOf(0) }
     // sources refresh by themselves while a snapshot is running
@@ -139,10 +140,7 @@ internal fun KopiaSnapshotsTab(api: ApiClient, base: String, host: ActionHost, t
             }
         }
         Column(Modifier.fillMaxSize()) {
-            ListHeader("${sources.size} Quellen · ${d["localUsername"].str}@${d["localHost"].str}") {
-                AddButton({ newSnap = true }, "Neuer Snapshot")
-                RefreshButton { refresh++ }
-            }
+            ListHeader("${sources.size} Quellen · ${d["localUsername"].str}@${d["localHost"].str}")
             Column {
                 sources.forEachIndexed { i, s ->
                     val t = KopiaTarget.of(s["source"])
@@ -368,8 +366,8 @@ private fun KopiaBrowse(api: ApiClient, base: String, path: List<Pair<String, St
 // ---------------- Policies tab ----------------
 
 @Composable
-internal fun KopiaPoliciesTab(api: ApiClient, base: String, host: ActionHost, tick: Int, open: KopiaTarget?, onOpen: (KopiaTarget?) -> Unit) {
-    var adding by remember { mutableStateOf(false) }
+internal fun KopiaPoliciesTab(api: ApiClient, base: String, host: ActionHost, tick: Int, open: KopiaTarget?, addState: androidx.compose.runtime.MutableState<Boolean>? = null, onOpen: (KopiaTarget?) -> Unit) {
+    var adding by (addState ?: remember { mutableStateOf(false) })
     var refresh by remember { mutableStateOf(0) }
     if (open != null) {
         BackHandler { onOpen(null) }
@@ -379,10 +377,7 @@ internal fun KopiaPoliciesTab(api: ApiClient, base: String, host: ActionHost, ti
     Loader(tick to refresh, { api.getJson("$base/srv/policies") to runCatching { api.getJson("$base/srv/current-user") }.getOrNull() }) { (d, me), _ ->
         val list = d["policies"].arr.map { KopiaTarget.of(it["target"]) to it["policy"] }.sortedBy { it.first.sortKey }
         Column(Modifier.fillMaxSize()) {
-            ListHeader("${list.size} Richtlinien") {
-                AddButton({ adding = true }, "Richtlinie anlegen")
-                RefreshButton { refresh++ }
-            }
+            ListHeader("${list.size} Richtlinien")
             Column {
                 list.forEachIndexed { i, (t, p) ->
                     val parts = listOfNotNull(
@@ -768,7 +763,7 @@ private fun KopiaTaskDialog(api: ApiClient, base: String, host: ActionHost, id: 
                     }
                     rows.forEachIndexed { i, (k, v) -> KeyValue(k, v, i) }
                     x["errorMessage"].str.takeIf { it.isNotBlank() }?.let { Text(it, color = StatusBad, fontSize = TextSmall) }
-                    if (x["status"].str == "RUNNING") SmallButton("Abbrechen", { host.post("Abbrechen", "$base/srv/tasks/$id/cancel") })
+                    if (x["status"].str == "RUNNING") GearMenu(listOf("Abbrechen" to { host.post("Abbrechen", "$base/srv/tasks/$id/cancel") }))
                     val lines = logs["logs"].arr
                     if (lines.isNotEmpty()) {
                         Text("Protokoll", fontWeight = Bold)
@@ -784,13 +779,22 @@ private fun KopiaTaskDialog(api: ApiClient, base: String, host: ActionHost, id: 
 // ---------------- Repository tab (server part) ----------------
 
 @Composable
-internal fun KopiaServerRepoCard(api: ApiClient, base: String, host: ActionHost, tick: Int) {
+internal fun KopiaServerRepoCard(api: ApiClient, base: String, host: ActionHost, tick: Int, local: List<Pair<String, String>>) {
     var refresh by remember { mutableStateOf(0) }
     var editDesc by remember { mutableStateOf<String?>(null) }
+    var stNow by remember { mutableStateOf<JsonElement?>(null) }
+    // one card "Repository": location and disk (agent) + what the Kopia server reports
+    SectionCard("Repository", stateKey = "kopia-repo", actions = {
+        GearMenu(listOf(
+            "Beschreibung ändern …" to { editDesc = stNow["description"].str },
+            "Mit Repository abgleichen" to { host.post("Abgleich", "$base/srv/repo/sync", after = { refresh++ }) },
+        ))
+    }) {
     Loader(tick to refresh, { api.getJson("$base/srv/repo/status") }) { st, _ ->
-        SectionCard("Repository-Status", stateKey = "kopia-srv-repo") {
+        LaunchedEffect(st) { stNow = st }
+        Column {
             if (st["readonly"].bool == true) Text("Nur lesend verbunden.", color = StatusWarn)
-            KeyValues(
+            KeyValues(*local.toTypedArray(),
                 "Beschreibung" to st["description"].str.ifBlank { "–" },
                 "Verbunden als" to "${st["username"].str}@${st["hostname"].str}",
                 "Konfiguration" to st["configFile"].str,
@@ -802,13 +806,8 @@ internal fun KopiaServerRepoCard(api: ApiClient, base: String, host: ActionHost,
                 "Fehlerkorrektur" to ((st["eccOverheadPercent"].long ?: 0).takeIf { it > 0 }?.let { "$it % (${st["ecc"].str})" } ?: "aus"),
                 "Interne Komprimierung" to if (st["supportsContentCompression"].bool == true) "ja" else "nein",
             )
-            ButtonRow {
-                SmallButton("Beschreibung ändern", { editDesc = st["description"].str })
-                SmallButton("Mit Repository abgleichen", {
-                    host.post("Abgleich", "$base/srv/repo/sync", after = { refresh++ })
-                })
-            }
         }
+    }
     }
     editDesc?.let { cur ->
         var text by remember { mutableStateOf(cur) }

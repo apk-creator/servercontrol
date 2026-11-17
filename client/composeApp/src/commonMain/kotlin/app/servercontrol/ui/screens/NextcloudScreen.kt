@@ -56,27 +56,34 @@ fun NextcloudMain(api: ApiClient, mod: JsonElement?, onSetupDone: () -> Unit) {
             "Wartung" -> CardColumn("cards.nc.wartung") {
                 card("Wartungsfenster") { NcMaintenanceWindow(api, host) }
                 card("Datenbank-Backup") { NcDbBackup(api, host) }
-                card("Datenbank") { SectionCard("Datenbank") {
-                    ButtonRow {
-                        SmallButton("Fehlende Indizes", { act("Fehlende Indizes", "add-missing-indices", null) })
-                        SmallButton("Fehlende Spalten", { act("Fehlende Spalten", "add-missing-columns", null) })
-                        SmallButton("Fehlende Primärschlüssel", { act("Primärschlüssel", "add-missing-primary-keys", null) })
-                    }
+                card("Protokoll") { NcLog(api) }
+                card("Datenbank") { SectionCard("Datenbank", actions = {
+                    GearMenu(listOf(
+                        "Fehlende Indizes ergänzen" to { act("Fehlende Indizes", "add-missing-indices", null) },
+                        "Fehlende Spalten ergänzen" to { act("Fehlende Spalten", "add-missing-columns", null) },
+                        "Fehlende Primärschlüssel ergänzen" to { act("Primärschlüssel", "add-missing-primary-keys", null) },
+                    ))
+                }) {
+                    Text("Fehlende Indizes, Spalten und Primärschlüssel ergänzen.", fontSize = TextSmall)
                 } }
-                card("Reparatur & Upgrade") { SectionCard("Reparatur & Upgrade") {
-                    ButtonRow {
-                        SmallButton("Reparatur", { act("Reparatur", "repair", null) })
-                        SmallButton("Reparatur (umfangreich)", { confirm = Confirm("Umfangreiche Reparatur?", "maintenance:repair --include-expensive kann lange dauern.") { act("Reparatur", "repair-expensive", null) } })
-                        SmallButton("occ upgrade", { confirm = Confirm("occ upgrade ausführen?", "Nur nach einem Update von Nextcloud nötig.") { act("Upgrade", "upgrade", null) } })
-                    }
+                card("Reparatur & Upgrade") { SectionCard("Reparatur & Upgrade", actions = {
+                    GearMenu(listOf(
+                        "Reparatur" to { act("Reparatur", "repair", null) },
+                        "Reparatur (umfangreich) …" to { confirm = Confirm("Umfangreiche Reparatur?", "maintenance:repair --include-expensive kann lange dauern.") { act("Reparatur", "repair-expensive", null) } },
+                        "occ upgrade …" to { confirm = Confirm("occ upgrade ausführen?", "Nur nach einem Update von Nextcloud nötig.") { act("Upgrade", "upgrade", null) } },
+                    ))
+                }) {
+                    Text("maintenance:repair und occ upgrade.", fontSize = TextSmall)
                 } }
-                card("Dateien") { SectionCard("Dateien") {
-                    ButtonRow {
-                        SmallButton("Alle Dateien scannen", { confirm = Confirm("Alle Dateien scannen?", "files:scan --all kann bei vielen Dateien Stunden dauern.") { act("Dateiscan", "files-scan-all", null) } })
-                        SmallButton("Dateicache aufräumen", { act("Cleanup", "files-cleanup", null) })
-                        SmallButton("Versionen aufräumen", { act("Versionen", "versions-cleanup", null) })
-                        SmallButton("Papierkorb aller leeren", { confirm = Confirm("Papierkorb aller Benutzer leeren?", "Gelöschte Dateien aller Benutzer werden endgültig entfernt.") { act("Papierkorb", "trashbin-cleanup", null) } })
-                    }
+                card("Dateien") { SectionCard("Dateien", actions = {
+                    GearMenu(listOf(
+                        "Alle Dateien scannen …" to { confirm = Confirm("Alle Dateien scannen?", "files:scan --all kann bei vielen Dateien Stunden dauern.") { act("Dateiscan", "files-scan-all", null) } },
+                        "Dateicache aufräumen" to { act("Cleanup", "files-cleanup", null) },
+                        "Versionen aufräumen" to { act("Versionen", "versions-cleanup", null) },
+                        "Papierkorb aller leeren …" to { confirm = Confirm("Papierkorb aller Benutzer leeren?", "Gelöschte Dateien aller Benutzer werden endgültig entfernt.") { act("Papierkorb", "trashbin-cleanup", null) } },
+                    ))
+                }) {
+                    Text("Dateien scannen, Dateicache, Versionen und Papierkorb aufräumen.", fontSize = TextSmall)
                 } }
                 card("Hintergrundjobs") { SectionCard("Hintergrundjobs") {
                     Loader(host.result == null, { api.getJson("$NC/background") }) { b, _ ->
@@ -102,18 +109,19 @@ fun NextcloudMain(api: ApiClient, mod: JsonElement?, onSetupDone: () -> Unit) {
 private fun NcStatus(api: ApiClient, host: ActionHost, ask: (Confirm) -> Unit) {
     Loader(host.result == null, { api.getJson("$NC/status") }) { st, reload ->
         Column(Modifier.verticalScroll(rememberScrollState())) {
-            SectionCard("Nextcloud", actions = { RefreshButton(reload) }) {
-                val maint = st["maintenance"].bool == true
+            val maint = st["maintenance"].bool == true
+            SectionCard("Nextcloud", actions = {
+                GearMenu(listOf(
+                    if (maint) "Wartungsmodus aus" to { host.post("Wartungsmodus aus", "$NC/action/maintenance-off", after = reload) }
+                    else "Wartungsmodus an …" to { ask(Confirm("Wartungsmodus aktivieren?", "Benutzer können Nextcloud dann nicht nutzen.") { host.post("Wartungsmodus an", "$NC/action/maintenance-on", after = reload) }) },
+                ))
+            }) {
                 KeyValues(
                     "Version" to st["versionstring"].str,
                     "Installiert" to st["installed"].str,
                     "Wartungsmodus" to if (maint) "AN" else "aus",
                 )
                 if (st["needsDbUpgrade"].bool == true) Text("Datenbank-Upgrade erforderlich (occ upgrade).", color = StatusWarn)
-                ButtonRow {
-                    if (maint) SmallButton("Wartungsmodus aus", { host.post("Wartungsmodus aus", "$NC/action/maintenance-off", after = reload) })
-                    else SmallButton("Wartungsmodus an", { ask(Confirm("Wartungsmodus aktivieren?", "Benutzer können Nextcloud dann nicht nutzen.") { host.post("Wartungsmodus an", "$NC/action/maintenance-on", after = reload) }) })
-                }
             }
             SectionCard("Einrichtungsprüfung") {
                 Loader(Unit, { api.getJson("$NC/setupchecks") }) { checks, _ ->
@@ -149,7 +157,16 @@ private fun NcMaintenanceWindow(api: ApiClient, host: ActionHost) {
         val set = w["set"].bool == true && !anytime
         val utc = raw?.takeIf { it in 0..23 } ?: 1
         var local by remember(w) { mutableStateOf(if (set) toLocal(utc).toString() else "") }
-        SectionCard("Wartungsfenster", actions = { RefreshButton(reload) }) {
+        SectionCard("Wartungsfenster", actions = {
+            GearMenu(buildList {
+                if (!anytime) add("Jederzeit erlauben" to {
+                    host.run("Wartungsfenster", { api.putRaw("$NC/maintenance-window", """{"startUtc":100}"""); "Aufwendige Hintergrundjobs dürfen jetzt jederzeit laufen." }, reload)
+                })
+                if (set || anytime) add("Entfernen" to {
+                    host.run("Wartungsfenster entfernt", { api.putRaw("$NC/maintenance-window", """{"startUtc":-1}"""); "Kein Wartungsfenster mehr festgelegt." }, reload)
+                })
+            })
+        }) {
             KeyValues(
                 "Beginn" to when { anytime -> "jederzeit (kein Fenster)"; set -> "${hh(toLocal(utc))} Ortszeit (${hh(utc)} UTC)"; else -> "nicht festgelegt" },
                 "Dauer" to if (anytime) "–" else "4 Stunden (von Nextcloud fest vorgegeben)",
@@ -162,14 +179,6 @@ private fun NcMaintenanceWindow(api: ApiClient, host: ActionHost) {
                     val u = toUtc(h ?: 0)
                     host.run("Wartungsfenster", { api.putRaw("$NC/maintenance-window", """{"startUtc":$u}"""); "Beginn ${hh(h ?: 0)} Ortszeit (${hh(u)} UTC)." }, reload)
                 }) { Text("Setzen") }
-            }
-            ButtonRow {
-                if (!anytime) SmallButton("Jederzeit erlauben", {
-                    host.run("Wartungsfenster", { api.putRaw("$NC/maintenance-window", """{"startUtc":100}"""); "Aufwendige Hintergrundjobs dürfen jetzt jederzeit laufen." }, reload)
-                })
-                if (set || anytime) SmallButton("Entfernen", {
-                    host.run("Wartungsfenster entfernt", { api.putRaw("$NC/maintenance-window", """{"startUtc":-1}"""); "Kein Wartungsfenster mehr festgelegt." }, reload)
-                })
             }
         }
     }
@@ -281,10 +290,7 @@ private fun NcApps(api: ApiClient, host: ActionHost, ask: (Confirm) -> Unit) {
         Column {
             Row(Modifier.padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 SearchField(filter, { filter = it }, modifier = Modifier.weight(1f))
-                RefreshButton(reload)
-            }
-            Row(Modifier.padding(horizontal = 12.dp)) {
-                SmallButton("Alle Apps aktualisieren", { ask(Confirm("Alle Apps aktualisieren?", "occ app:update --all") { host.post("App-Updates", "$NC/action/app-update-all") }) })
+                GearMenu(listOf("Alle Apps aktualisieren …" to { ask(Confirm("Alle Apps aktualisieren?", "occ app:update --all") { host.post("App-Updates", "$NC/action/app-update-all") }) }))
             }
             val all = apps["enabled"].obj.map { Triple(it.key, it.value.str, true) } + apps["disabled"].obj.map { Triple(it.key, it.value.str, false) }
             LazyColumn {
@@ -330,10 +336,10 @@ private fun NcDbBackup(api: ApiClient, host: ActionHost) {
     var tick by remember { mutableStateOf(0) }
     var edit by remember { mutableStateOf(false) }
     SectionCard("Datenbank-Backup", actions = {
-        RefreshButton { tick++ }
-        IconButton(onClick = { edit = true }) {
-            androidx.compose.material3.Icon(androidx.compose.material.icons.Icons.Default.Settings, "Einstellungen", Modifier.size(20.dp))
-        }
+        GearMenu(listOf(
+            "Jetzt sichern" to { host.post("Datenbank sichern", "/api/nextcloud/dbbackup/run", after = { tick++ }) },
+            "Einstellungen …" to { edit = true },
+        ))
     }) {
         Loader(tick, { api.getJson("/api/nextcloud/dbbackup") }) { d, _ ->
             val c = d["config"]
@@ -352,10 +358,8 @@ private fun NcDbBackup(api: ApiClient, host: ActionHost) {
             KeyValue("Datenbank", d["database"].str.ifBlank { "–" }, i++)
             KeyValue("Ordner", c["dir"].str, i++)
             KeyValue("Aufbewahrt", "die letzten ${c["keep"].long ?: 3}", i++)
-            ButtonRow {
-                SmallButton("Jetzt sichern", { host.post("Datenbank sichern", "/api/nextcloud/dbbackup/run", after = { tick++ }) }, enabled = d["installed"].bool == true && d["running"].bool != true)
-            }
-            if (d["installed"].bool != true) Text("Noch nicht eingerichtet – über das Zahnrad einstellen und speichern.", fontSize = TextSmall)
+            if (d["running"].bool == true) Text("Sicherung läuft …", fontSize = TextSmall)
+            if (d["installed"].bool != true) Text("Noch nicht eingerichtet – Zahnrad → Einstellungen → Speichern.", fontSize = TextSmall)
             files.forEachIndexed { n, f ->
                 Row(Modifier.fillMaxWidth().background(stripe(n)).padding(4.dp)) {
                     Text(f["name"].str, Modifier.weight(1f), maxLines = 1, fontSize = TextSmall)
@@ -403,4 +407,38 @@ private fun NcDbBackupDialog(api: ApiClient, c: JsonElement?, host: ActionHost, 
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Abbrechen") } },
     )
+}
+
+
+/** Nextcloud → Wartung → Protokoll: newest entries of nextcloud.log first, text selectable */
+@Composable
+private fun NcLog(api: ApiClient) {
+    var level by remember { mutableStateOf(0) }
+    SectionCard("Protokoll") {
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FilterPill(level == 0, { level = 0 }, "Alle")
+            FilterPill(level == 2, { level = 2 }, "Warnungen")
+            FilterPill(level == 3, { level = 3 }, "Fehler")
+        }
+        Loader(level, { api.getJson("/api/nextcloud/log?n=150&level=$level") }) { d, _ ->
+            val list = d["entries"].arr
+            if (list.isEmpty()) Text("Keine Einträge.", fontSize = TextSmall)
+            androidx.compose.foundation.text.selection.SelectionContainer {
+                Column {
+                    list.forEachIndexed { i, e ->
+                        val lv = e["level"].long?.toInt() ?: 0
+                        Column(Modifier.fillMaxWidth().background(stripe(i)).padding(4.dp)) {
+                            Text(
+                                listOf(e["time"].str.take(19).replace('T', ' '), when (lv) { 0 -> "Debug"; 1 -> "Info"; 2 -> "Warnung"; 3 -> "Fehler"; else -> "Fatal" },
+                                    e["app"].str, e["user"].str.takeIf { it.isNotBlank() && it != "--" }).filterNotNull().filter { it.isNotBlank() }.joinToString(" · "),
+                                fontSize = TextSmall,
+                                color = when { lv >= 3 -> StatusBad; lv == 2 -> StatusWarn; else -> MaterialTheme.colorScheme.onSurfaceVariant },
+                            )
+                            Text(e["message"].str, fontSize = TextSmall, maxLines = 6)
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

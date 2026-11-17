@@ -136,24 +136,46 @@ fun <T> Loader(
     var data by remember(if (showSpinnerOnReload) key else Unit) { mutableStateOf<T?>(null) }
     var err by remember(key) { mutableStateOf<String?>(null) }
     var loading by remember(key) { mutableStateOf(true) }
-    LaunchedEffect(key, tick) {
+    // page-wide refresh (pull down on Android, the one reload symbol on the desktop)
+    val page = PageRefresh.tick
+    var seenPage by remember { mutableIntStateOf(page) }
+    var quiet by remember { mutableStateOf(false) }
+    LaunchedEffect(key, tick, page) {
+        val byPage = page != seenPage
+        seenPage = page
+        quiet = byPage
         loading = true
         err = null
+        if (byPage) PageRefresh.pending++
         try {
             data = load()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Throwable) {
             err = e.message ?: e.toString()
+        } finally {
+            if (byPage) PageRefresh.pending--
+            loading = false
         }
-        loading = false
     }
     val reload: () -> Unit = { tick++ }
     Column(Modifier.fillMaxSize()) {
-        if (loading && (showSpinnerOnReload || data == null)) LinearProgressIndicator(Modifier.fillMaxWidth())
+        if (loading && !quiet && (showSpinnerOnReload || data == null)) LinearProgressIndicator(Modifier.fillMaxWidth())
         err?.let { ErrorCard(it, reload) }
         val d = data
         if (d != null) content(d, reload)
         else if (loading) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
     }
+}
+
+/**
+ * One refresh for the whole page: every [Loader] reloads when [tick] changes; [pending] counts
+ * the loads still running, so the pull-to-refresh symbol can wait for all of them.
+ */
+object PageRefresh {
+    var tick by mutableIntStateOf(0)
+    var pending by mutableIntStateOf(0)
+    fun refresh() { tick++ }
 }
 
 @Composable
@@ -220,8 +242,9 @@ fun SectionCard(
 
 /** Refresh symbol (instead of a "Neu laden" button). */
 @Composable
+@Suppress("UNUSED_PARAMETER")
 fun RefreshButton(onClick: () -> Unit) {
-    IconButton(onClick = onClick, modifier = Modifier.size(40.dp)) { Icon(Icons.Default.Refresh, "Neu laden", Modifier.size(22.dp)) }
+    // no reload symbols in the cards any more: pull down (Android) or the one symbol in the title bar (desktop)
 }
 
 @Composable

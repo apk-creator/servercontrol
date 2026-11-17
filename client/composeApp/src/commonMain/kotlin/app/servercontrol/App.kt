@@ -47,6 +47,9 @@ import androidx.compose.ui.unit.dp
 import app.servercontrol.data.ServerProfile
 import app.servercontrol.ui.screens.*
 import kotlinx.coroutines.launch
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.ui.graphics.graphicsLayer
+import kotlinx.coroutines.flow.first
 import kotlin.random.Random
 
 // Monochrome design: black / grey / white. Only status indicators keep colour.
@@ -324,7 +327,11 @@ fun MainScreen(state: AppState) {
                     navigationIcon = {
                         if (!wide) IconButton(onClick = { scope.launch { drawer.open() } }) { Icon(Icons.Default.Menu, "Menü") }
                     },
-                    actions = { HelpButton(state.section) },
+                    actions = {
+                        // desktop: the one reload symbol of the page
+                        if (isDesktop) DesktopReloadButton()
+                        HelpButton(state.section)
+                    },
                 )
             }) { pad ->
                 // keyboard pushes the content up (Android 15 draws edge-to-edge)
@@ -337,7 +344,7 @@ fun MainScreen(state: AppState) {
                     } else {
                         Column(Modifier.fillMaxSize()) {
                             UpdateNotice(state)
-                            Box(Modifier.weight(1f)) { SectionContent(state, session) }
+                            Box(Modifier.weight(1f)) { PageRefreshContainer(state.section) { SectionContent(state, session) } }
                         }
                     }
                 }
@@ -426,4 +433,40 @@ fun CrashReportDialog() {
         },
         dismissButton = { TextButton(onClick = { clearCrashReport(); report = null }) { Text("Schließen") } },
     )
+}
+
+
+/** Android: pull down at the top of a page to reload all of its cards (like a browser). */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PageRefreshContainer(section: Section, content: @Composable () -> Unit) {
+    if (isDesktop || section == Section.TERMINAL) {
+        content()
+        return
+    }
+    var refreshing by remember { mutableStateOf(false) }
+    LaunchedEffect(refreshing) {
+        if (!refreshing) return@LaunchedEffect
+        kotlinx.coroutines.delay(400) // let the cards start their loads
+        kotlinx.coroutines.withTimeoutOrNull(60_000) {
+            androidx.compose.runtime.snapshotFlow { app.servercontrol.ui.PageRefresh.pending }.first { it == 0 }
+        }
+        refreshing = false // snaps back to the top
+    }
+    androidx.compose.material3.pulltorefresh.PullToRefreshBox(
+        isRefreshing = refreshing,
+        onRefresh = { refreshing = true; app.servercontrol.ui.PageRefresh.refresh() },
+        modifier = Modifier.fillMaxSize(),
+    ) { content() }
+}
+
+/** Desktop: one reload symbol in the title bar; turns while the cards are loading. */
+@Composable
+private fun DesktopReloadButton() {
+    val busy = app.servercontrol.ui.PageRefresh.pending > 0
+    val turn = androidx.compose.animation.core.rememberInfiniteTransition()
+    val angle by turn.animateFloat(0f, 360f, androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(900, easing = androidx.compose.animation.core.LinearEasing)))
+    IconButton(onClick = { app.servercontrol.ui.PageRefresh.refresh() }) {
+        Icon(Icons.Default.Refresh, "Neu laden", Modifier.graphicsLayer { rotationZ = if (busy) angle else 0f })
+    }
 }

@@ -194,6 +194,7 @@ func (s *Server) routes() http.Handler {
 	priv.HandleFunc("GET /api/nextcloud/maintenance-window", s.handleNcMaintWindow)
 	priv.HandleFunc("PUT /api/nextcloud/maintenance-window", s.handleNcMaintWindowSet)
 	priv.HandleFunc("POST /api/nextcloud/action/{action}", s.handleNcAction)
+	priv.HandleFunc("GET /api/nextcloud/log", s.handleNcLog)
 	priv.HandleFunc("GET /api/nextcloud/dbbackup", s.handleDBBackup)
 	priv.HandleFunc("PUT /api/nextcloud/dbbackup", s.handleDBBackupSet)
 	priv.HandleFunc("POST /api/nextcloud/dbbackup/run", s.handleDBBackupRun)

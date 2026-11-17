@@ -77,14 +77,14 @@ fun OverviewScreen(api: ApiClient, goTo: (String) -> Unit) {
     var power by remember { mutableStateOf<String?>(null) } // "reboot" / "poweroff"
     var popup by remember { mutableStateOf<String?>(null) } // "cores" / "board" / "hdd"
     val host = rememberActionHost { api }
-    LaunchedEffect(api) {
+    LaunchedEffect(api, PageRefresh.tick) {
         while (true) {
             try { ov = api.get("/api/system/overview"); err = null } catch (e: Throwable) { err = e.message }
             delay(5_000)
         }
     }
     var drives by remember { mutableStateOf<JsonElement?>(null) }
-    LaunchedEffect(api) {
+    LaunchedEffect(api, PageRefresh.tick) {
         while (true) {
             runCatching { hist = api.get("/api/system/history") }
             runCatching { drives = api.getJson("/api/storage/drives") }
@@ -356,18 +356,19 @@ fun ContainersScreen(api: ApiClient) {
             items(list.arr) { c ->
                 val name = c["Names"].str
                 val running = c["State"].str == "running"
-                SectionCard(name) {
+                SectionCard(name, actions = {
+                    GearMenu(buildList {
+                        if (!running) add("Start" to { host.post("Start $name", "/api/containers/${enc(name)}/start", after = reload) })
+                        if (running) add("Neustart" to { host.post("Neustart $name", "/api/containers/${enc(name)}/restart", after = reload) })
+                        if (running) add("Stopp …" to { confirm = Confirm("$name stoppen?", "Der Container wird angehalten.") { host.post("Stopp $name", "/api/containers/${enc(name)}/stop", after = reload) } })
+                        add("Logs" to { host.run("Logs $name", { api.getJson("/api/containers/${enc(name)}/logs")["log"].str }) })
+                    })
+                }) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         StatusDot(if (running) StatusOk else StatusBad); Spacer(Modifier.width(8.dp))
                         Text(c["Status"].str)
                     }
                     KeyValues("Image" to c["Image"].str, if (running) "Last" to "CPU ${c["CPUPerc"].str} · RAM ${c["MemUsage"].str}" else null)
-                    ButtonRow {
-                        if (!running) SmallButton("Start", { host.post("Start $name", "/api/containers/${enc(name)}/start", after = reload) })
-                        if (running) SmallButton("Neustart", { host.post("Neustart $name", "/api/containers/${enc(name)}/restart", after = reload) })
-                        if (running) SmallButton("Stopp", { confirm = Confirm("$name stoppen?", "Der Container wird angehalten.") { host.post("Stopp $name", "/api/containers/${enc(name)}/stop", after = reload) } })
-                        SmallButton("Logs", { host.run("Logs $name", { api.getJson("/api/containers/${enc(name)}/logs")["log"].str }) })
-                    }
                 }
             }
         }
@@ -701,7 +702,10 @@ private fun StandbyCard(api: ApiClient) {
     val scope = rememberCoroutineScope()
     var tick by remember { mutableStateOf(0) }
     var err by remember { mutableStateOf<String?>(null) }
-    SectionCard("Spindown", actions = { RefreshButton { tick++ } }) {
+    var hdIdleMissing by remember { mutableStateOf(false) }
+    SectionCard("Spindown", actions = {
+        if (hdIdleMissing) GearMenu(listOf("hd-idle installieren" to { host.post("hd-idle installieren", "/api/storage/standby/install-hdidle", after = { tick++ }) }))
+    }) {
         Loader(tick, { api.getJson("/api/storage/standby") }) { d, _ ->
             val times = remember(d) {
                 androidx.compose.runtime.mutableStateMapOf<String, Int>().apply {
@@ -718,10 +722,8 @@ private fun StandbyCard(api: ApiClient) {
                 }
             }
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                if (d["hdidle"].bool != true) {
-                    Text("hd-idle ist nicht installiert.", color = StatusWarn, fontSize = TextSmall)
-                    SmallButton("hd-idle installieren", { host.post("hd-idle installieren", "/api/storage/standby/install-hdidle", after = { tick++ }) })
-                }
+                LaunchedEffect(d) { hdIdleMissing = d["hdidle"].bool != true }
+                if (d["hdidle"].bool != true) Text("hd-idle ist nicht installiert (Zahnrad → installieren).", color = StatusWarn, fontSize = TextSmall)
                 err?.let { Text(it, color = StatusBad, fontSize = TextSmall) }
                 val disks = d["disks"].arr
                 if (disks.isEmpty()) Text("Keine HDDs gefunden.", fontSize = TextSmall)

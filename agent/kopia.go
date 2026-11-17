@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -541,7 +542,8 @@ func (s *Server) handleKopiaMaintSet(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, 400, err.Error())
 			return
 		}
-		args = append(args, t.flag+strconv.Itoa(int(d.Minutes()))+"m")
+		// round up: "03:00" must not become 02:59 because a few seconds of the current minute have passed
+		args = append(args, t.flag+strconv.Itoa(int(math.Ceil(d.Minutes())))+"m")
 	}
 	logf("kopia %s: %v", k.ID, args)
 	dropCLICache(k.ID)

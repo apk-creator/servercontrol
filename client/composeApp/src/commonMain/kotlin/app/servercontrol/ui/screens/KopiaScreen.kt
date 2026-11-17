@@ -245,6 +245,15 @@ private fun hoursOf(ns: Long?): String = ns?.let { n ->
     if (h >= 1 && h % 24.0 == 0.0 && h >= 48) "${(h / 24).toLong()} Tage" else if (h >= 1) "${h.toLong()} h" else "${(n / 60_000_000_000)} min"
 } ?: "–"
 
+/** kopia JSON duration (nanoseconds) → "1 Tag" / "7 Tage" (hours only if not whole days) */
+private fun daysOf(ns: Long?): String = ns?.let { n ->
+    val h = n / 3_600_000_000_000.0
+    when {
+        h >= 24 && h % 24.0 == 0.0 -> (h / 24).toLong().let { if (it == 1L) "Tag" else "$it Tage" }
+        else -> hoursOf(n)
+    }
+} ?: "–"
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 internal fun KopiaRepoPage(api: ApiClient, repo: KopiaRepo, sharedPos: androidx.compose.runtime.MutableIntState, onEditRepo: () -> Unit) {
@@ -257,7 +266,11 @@ internal fun KopiaRepoPage(api: ApiClient, repo: KopiaRepo, sharedPos: androidx.
     var maintAsk by remember { mutableStateOf(false) }
     var freshReq by remember { mutableStateOf(0) }
     var freshDone by remember { mutableStateOf(0) }
+    // the page refresh also reads the maintenance info again (wakes the disk)
+    var freshPage by remember { mutableStateOf(PageRefresh.tick) }
     var history by remember(repo.id) { mutableStateOf<KopiaTarget?>(null) }
+    val addSnap = remember { mutableStateOf(false) }
+    val addPolicy = remember { mutableStateOf(false) }
     var policyOpen by remember(repo.id) { mutableStateOf<KopiaTarget?>(null) }
     val hist = history
     val pol = policyOpen
@@ -287,13 +300,13 @@ internal fun KopiaRepoPage(api: ApiClient, repo: KopiaRepo, sharedPos: androidx.
             })
             SmallButton("Wartung", { maintAsk = true })
             Spacer(Modifier.weight(1f))
-            RefreshButton { tick++ }
             IconButton(onClick = onEditRepo) { Icon(Icons.Default.Settings, "Einstellungen des Repositorys", Modifier.size(20.dp)) }
         }
         Loader(Triple(repo.id, tick, freshReq), {
             // maintenance info is cached on the agent; "fresh" reads it again (wakes the disk)
-            val fresh = freshReq != freshDone
+            val fresh = freshReq != freshDone || PageRefresh.tick != freshPage
             freshDone = freshReq
+            freshPage = PageRefresh.tick
             api.getJson("$base/status" + if (fresh) "?fresh=1" else "", 120_000)
         }, showSpinnerOnReload = false) { status, _ ->
             val viaServer = status["via"].str == "server"
@@ -309,42 +322,45 @@ internal fun KopiaRepoPage(api: ApiClient, repo: KopiaRepo, sharedPos: androidx.
                 }
                 if (viaServer) {
                     card("Snapshots") {
-                        SectionCard("Snapshots", stateKey = "kopia-snapshots") {
-                            KopiaSnapshotsTab(api, base, host, tick, onRestore = { restore = it }, onPolicy = { policyOpen = it }, onOpenSource = { history = it })
+                        SectionCard("Snapshots", stateKey = "kopia-snapshots", actions = { AddButton({ CardState.collapsed["kopia-snapshots"] = false; addSnap.value = true }, "Neuer Snapshot") }) {
+                            KopiaSnapshotsTab(api, base, host, tick, onRestore = { restore = it }, onPolicy = { policyOpen = it }, onOpenSource = { history = it }, addState = addSnap)
                         }
                     }
                     card("Richtlinien") {
-                        SectionCard("Richtlinien", stateKey = "kopia-policies", initiallyCollapsed = true) {
-                            KopiaPoliciesTab(api, base, host, tick, null) { policyOpen = it }
+                        SectionCard("Richtlinien", stateKey = "kopia-policies", actions = { AddButton({ CardState.collapsed["kopia-policies"] = false; addPolicy.value = true }, "Richtlinie anlegen") }) {
+                            KopiaPoliciesTab(api, base, host, tick, null, addPolicy) { policyOpen = it }
                         }
                     }
                     card("Aufgaben") {
-                        SectionCard("Aufgaben", stateKey = "kopia-tasks", initiallyCollapsed = true) { KopiaTasksTab(api, base, host, tick) }
+                        SectionCard("Aufgaben", stateKey = "kopia-tasks") { KopiaTasksTab(api, base, host, tick) }
                     }
                 }
+                val st = status["status"]
+                val drv = status["drive"]
+                val total = drv["total"].long ?: 0
+                val local = listOf(
+                    "Verzeichnis" to st["storage"]["config"]["path"].str.ifBlank { st["storage"]["type"].str },
+                    "Laufwerk" to (drv["disk"].str.ifBlank { drv["device"].str }.ifBlank { "–" }),
+                    "Name" to (drv["model"].str.ifBlank { "–" } + (drv["rotational"].bool?.let { if (it) " (HDD)" else " (SSD)" } ?: "")),
+                    "Ausnutzung" to if (total > 0) "${100 * (drv["used"].long ?: 0) / total} % · ${formatBytes(drv["used"].long)} von ${formatBytes(total)}" else "–",
+                )
                 card("Repository") {
-                    SectionCard("Repository", stateKey = "kopia-repo", initiallyCollapsed = true) {
+                    if (viaServer) KopiaServerRepoCard(api, base, host, tick, local)
+                    else SectionCard("Repository", stateKey = "kopia-repo") {
                         status["error"]?.let { Text(it.str, color = StatusBad) }
-                        val st = status["status"]
-                        val d = status["drive"]
-                        val total = d["total"].long ?: 0
-                        KeyValues(
-                            "Verzeichnis" to st["storage"]["config"]["path"].str.ifBlank { st["storage"]["type"].str },
-                            "Laufwerk" to (d["disk"].str.ifBlank { d["device"].str }.ifBlank { "–" }),
-                            "Name" to (d["model"].str.ifBlank { "–" } + (d["rotational"].bool?.let { if (it) " (HDD)" else " (SSD)" } ?: "")),
-                            "Ausnutzung" to if (total > 0) "${100 * (d["used"].long ?: 0) / total} % · ${formatBytes(d["used"].long)} von ${formatBytes(total)}" else "–",
-                            "Konfiguration" to repo.configFile,
-                            "Abfrage" to if (viaServer) "über den Kopia-Server" else "Kommandozeile",
-                        )
+                        KeyValues(*local.toTypedArray(), "Konfiguration" to repo.configFile, "Abfrage" to "Kommandozeile")
                     }
                 }
-                if (viaServer) card("Server") { KopiaServerRepoCard(api, base, host, tick) }
                 card("Wartung") {
-                    SectionCard("Wartung", stateKey = "kopia-maint", initiallyCollapsed = true) {
+                    SectionCard("Wartung", stateKey = "kopia-maint", actions = {
+                        IconButton(onClick = { editMaint = status["maintenance"] ?: kotlinx.serialization.json.JsonObject(emptyMap()) }) {
+                            Icon(Icons.Default.Settings, "Zeitplan der Wartung", Modifier.size(20.dp))
+                        }
+                    }) {
                         val m = status["maintenance"]
                         val rows = mutableListOf(
-                            "Kurzwartung" to (if (m["quick"]["enabled"].bool == true) "alle ${hoursOf(m["quick"]["interval"].long)}" else "aus"),
-                            "Wartung" to (if (m["full"]["enabled"].bool == true) "alle ${hoursOf(m["full"]["interval"].long)}" else "aus"),
+                            "Kurzwartung" to (if (m["quick"]["enabled"].bool == true) "alle ${daysOf(m["quick"]["interval"].long)}" else "aus"),
+                            "Wartung" to (if (m["full"]["enabled"].bool == true) "alle ${daysOf(m["full"]["interval"].long)}" else "aus"),
                         )
                         m["schedule"]["nextQuickMaintenance"].str.takeIf { it.isNotBlank() && m["quick"]["enabled"].bool == true }?.let { rows += "Nächste Kurzwartung" to localTime(it) }
                         m["schedule"]["nextFullMaintenance"].str.takeIf { it.isNotBlank() && m["full"]["enabled"].bool == true }?.let { rows += "Nächste Wartung" to localTime(it) }
@@ -355,10 +371,6 @@ internal fun KopiaRepoPage(api: ApiClient, repo: KopiaRepo, sharedPos: androidx.
                         }
                         status["maintenanceAt"].long?.takeIf { it > 0 }?.let { rows += "Stand" to formatTime(it).dropLast(3) }
                         rows.forEachIndexed { i, (k, v) -> KeyValue(k, v, i) }
-                        ButtonRow {
-                            SmallButton("Zeitplan", { editMaint = m ?: kotlinx.serialization.json.JsonObject(emptyMap()) })
-                            SmallButton("Neu lesen", { freshReq++ })
-                        }
                     }
                 }
                 if (viaServer) card("Benachrichtigungen") { KopiaPrefsTab(api, base, host, tick) }
@@ -431,7 +443,8 @@ private fun KopiaCliSnapshots(api: ApiClient, base: String, tick: Int, onSelect:
 
 @Composable
 private fun MaintenanceEditor(base: String, m: JsonElement, host: ActionHost, onDone: () -> Unit) {
-    fun h(ns: Long?) = ns?.let { (it / 3_600_000_000_000).toString() } ?: ""
+    // interval in days (at least 1)
+    fun h(ns: Long?) = ns?.let { ((it / 3_600_000_000_000) / 24).coerceAtLeast(1).toString() } ?: "1"
     var quick by remember { mutableStateOf(m["quick"]["enabled"].bool == true) }
     var full by remember { mutableStateOf(m["full"]["enabled"].bool == true) }
     var quickH by remember { mutableStateOf(h(m["quick"]["interval"].long)) }
@@ -449,14 +462,14 @@ private fun MaintenanceEditor(base: String, m: JsonElement, host: ActionHost, on
                     Text("Kurzwartung", Modifier.weight(1f)); Switch(quick, { quick = it })
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(quickH, { quickH = it.filter(Char::isDigit).take(4) }, Modifier.weight(1f), label = { Text("alle … Stunden") }, singleLine = true, enabled = quick)
+                    OutlinedTextField(quickH, { quickH = it.filter(Char::isDigit).take(3) }, Modifier.weight(1f), label = { Text("alle … Tage") }, singleLine = true, enabled = quick)
                     OutlinedTextField(quickT, { quickT = it.filter { c -> c.isDigit() || c == ':' }.take(5) }, Modifier.weight(1f), label = { Text("Uhrzeit") }, placeholder = { Text("03:00") }, singleLine = true, enabled = quick, isError = !clockOk(quickT))
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Wartung", Modifier.weight(1f)); Switch(full, { full = it })
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(fullH, { fullH = it.filter(Char::isDigit).take(4) }, Modifier.weight(1f), label = { Text("alle … Stunden") }, singleLine = true, enabled = full)
+                    OutlinedTextField(fullH, { fullH = it.filter(Char::isDigit).take(3) }, Modifier.weight(1f), label = { Text("alle … Tage") }, singleLine = true, enabled = full)
                     OutlinedTextField(fullT, { fullT = it.filter { c -> c.isDigit() || c == ':' }.take(5) }, Modifier.weight(1f), label = { Text("Uhrzeit") }, placeholder = { Text("04:00") }, singleLine = true, enabled = full, isError = !clockOk(fullT))
                 }
             }
@@ -465,7 +478,7 @@ private fun MaintenanceEditor(base: String, m: JsonElement, host: ActionHost, on
             TextButton(enabled = clockOk(quickT) && clockOk(fullT), onClick = {
                 val body = buildJsonObject {
                     put("quickEnabled", quick); put("fullEnabled", full)
-                    put("quickHours", quickH.toIntOrNull() ?: 0); put("fullHours", fullH.toIntOrNull() ?: 0)
+                    put("quickHours", (quickH.toIntOrNull() ?: 1).coerceAtLeast(1) * 24); put("fullHours", (fullH.toIntOrNull() ?: 1).coerceAtLeast(1) * 24)
                     if (quick && quickT.isNotBlank()) put("quickTime", quickT)
                     if (full && fullT.isNotBlank()) put("fullTime", fullT)
                 }.toString()

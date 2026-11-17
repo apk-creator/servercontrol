@@ -63,6 +63,15 @@ fun SshKeysScreen(state: AppState, session: Session, top: app.servercontrol.ui.C
     var importKey by remember { mutableStateOf(false) }
     var genError by remember { mutableStateOf<String?>(null) }
     var exportAsk by remember { mutableStateOf(false) }
+    // keys/settings of the server for the title-row menu of "Eingetragene Schlüssel"
+    var srv by remember { mutableStateOf<kotlinx.serialization.json.JsonElement?>(null) }
+    var reloadSrv by remember { mutableStateOf<() -> Unit>({}) }
+    fun togglePw(enable: Boolean) {
+        val body = buildJsonObject { put("enabled", enable); put("user", user.trim()) }.toString()
+        host.run("Passwort-Anmeldung", {
+            AppJson.parseToJsonElement(api.postRaw("/api/ssh/password-auth", body))["message"].str
+        }, reloadSrv)
+    }
 
     fun register(key: String) {
         val u = user.trim()
@@ -79,7 +88,20 @@ fun SshKeysScreen(state: AppState, session: Session, top: app.servercontrol.ui.C
         top()
         // ---------- key of this device ----------
         card("Schlüssel dieses Geräts") { SectionCard("Schlüssel dieses Geräts", actions = {
-            if (session.profile.sshPrivateKey.isNotBlank()) GearMenu(listOf("Privaten Schlüssel exportieren …" to { exportAsk = true }))
+            if (session.profile.sshPrivateKey.isNotBlank()) GearMenu(buildList {
+                val pub = session.profile.sshPublicKey
+                if (pub.isNotBlank()) {
+                    add("Öffentlichen Schlüssel kopieren" to { clipboard.setText(AnnotatedString(pub)) })
+                    if (user.isNotBlank()) add("Auf dem Server eintragen (${user.trim()})" to { register(pub) })
+                }
+                add("Privaten Schlüssel exportieren …" to { exportAsk = true })
+                add("Schlüssel löschen …" to {
+                    confirm = Confirm("Schlüssel dieses Geräts löschen?",
+                        "Der private Schlüssel wird aus der App entfernt. Trage ihn auf dem Server ebenfalls aus (unten), sonst bleibt der Eintrag dort bestehen.") {
+                        state.updateSessionProfile(session.profile.copy(sshPrivateKey = "", sshPublicKey = "", sshKeyFingerprint = ""))
+                    }
+                })
+            })
         }) {
             val p = session.profile
             if (p.sshPrivateKey.isBlank()) {
@@ -121,57 +143,39 @@ fun SshKeysScreen(state: AppState, session: Session, top: app.servercontrol.ui.C
                     KeyValues("Typ" to p.sshPublicKey.substringBefore(' '), "Fingerprint" to p.sshKeyFingerprint)
                     Text("Öffentlicher Schlüssel:", fontSize = TextSmall)
                     MonoText(p.sshPublicKey)
-                    ButtonRow {
-                        SmallButton("Kopieren", { clipboard.setText(AnnotatedString(p.sshPublicKey)) })
-                        Button(enabled = user.isNotBlank(), onClick = { register(p.sshPublicKey) }) { Text("Auf dem Server eintragen") }
-                    }
                 } else {
                     Text("Ein importierter privater Schlüssel ist hinterlegt (im Terminal-Dialog eingefügt).", fontSize = TextSmall)
                 }
                 Text("Das Terminal meldet sich damit automatisch an (Benutzer: ${user.ifBlank { "–" }}).", fontSize = TextSmall)
-                ButtonRow {
-                    SmallButton("Schlüssel löschen", {
-                        confirm = Confirm("Schlüssel dieses Geräts löschen?",
-                            "Der private Schlüssel wird aus der App entfernt. Trage ihn auf dem Server ebenfalls aus (unten), sonst bleibt der Eintrag dort bestehen.") {
-                            state.updateSessionProfile(session.profile.copy(sshPrivateKey = "", sshPublicKey = "", sshKeyFingerprint = ""))
-                        }
-                    })
-                }
             }
         } }
 
         // ---------- keys on the server ----------
-        card("Eingetragene Schlüssel auf dem Server") { SectionCard("Eingetragene Schlüssel auf dem Server") {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                OutlinedTextField(user, { user = it.trim() }, Modifier.weight(1f), label = { Text("SSH-Benutzer") }, singleLine = true)
-                Spacer(Modifier.width(8.dp))
-                SmallButton("Laden", { refresh++ }, enabled = user.isNotBlank())
-            }
+        card("Eingetragene Schlüssel auf dem Server") { SectionCard("Eingetragene Schlüssel auf dem Server", actions = {
+            AddButton({ addKey = true }, "Schlüssel eines anderen Geräts hinzufügen")
+            val pw = srv["passwordAuthentication"].str
+            val keyCount = srv["keys"].arr.size
+            val mineRegistered = srv["keys"].arr.any { it["fingerprint"].str == session.profile.sshKeyFingerprint }
+            GearMenu(buildList {
+                if (pw == "yes" && keyCount > 0) add("Passwort-Anmeldung abschalten …" to {
+                    confirm = Confirm("Passwort-Anmeldung per SSH abschalten?",
+                        "Danach kommen nur noch Geräte mit eingetragenem Schlüssel per SSH auf den Server (alle Benutzer)." +
+                            (if (!mineRegistered) "\n\nACHTUNG: Der Schlüssel dieses Geräts ist für ${user.trim()} nicht eingetragen!" else "") +
+                            "\n\nVorher am besten einmal per Schlüssel anmelden und die Sitzung offen lassen. Notfallzugang bleibt Cockpit (Port 9090) und diese App.") {
+                        togglePw(false)
+                    }
+                })
+                if (pw == "no") add("Passwort-Anmeldung wieder einschalten" to { togglePw(true) })
+            })
+        }) {
+            OutlinedTextField(user, { user = it.trim() }, Modifier.fillMaxWidth(), label = { Text("SSH-Benutzer") }, singleLine = true)
             if (user.isNotBlank()) {
                 Loader(user to refresh, { api.getJson("/api/ssh/keys?user=${user.trim()}") }) { d, reload ->
+                    LaunchedEffect(d) { srv = d; reloadSrv = reload }
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(d["file"].str, fontSize = TextSmall)
                         val pw = d["passwordAuthentication"].str
-                        if (pw.isNotBlank()) {
-                            Text("Passwort-Anmeldung per SSH: ${if (pw == "yes") "an" else "aus"}", fontSize = TextSmall, fontWeight = Bold)
-                            val keyCount = d["keys"].arr.size
-                            val mineRegistered = d["keys"].arr.any { it["fingerprint"].str == session.profile.sshKeyFingerprint }
-                            fun toggle(enable: Boolean) {
-                                val body = buildJsonObject { put("enabled", enable); put("user", user.trim()) }.toString()
-                                host.run("Passwort-Anmeldung", {
-                                    AppJson.parseToJsonElement(api.postRaw("/api/ssh/password-auth", body))["message"].str
-                                }, reload)
-                            }
-                            if (pw == "yes" && keyCount > 0) SmallButton("Passwort-Anmeldung abschalten", {
-                                confirm = Confirm("Passwort-Anmeldung per SSH abschalten?",
-                                    "Danach kommen nur noch Geräte mit eingetragenem Schlüssel per SSH auf den Server (alle Benutzer)." +
-                                        (if (!mineRegistered) "\n\nACHTUNG: Der Schlüssel dieses Geräts ist für ${user.trim()} nicht eingetragen!" else "") +
-                                        "\n\nVorher am besten einmal per Schlüssel anmelden und die Sitzung offen lassen. Notfallzugang bleibt Cockpit (Port 9090) und diese App.") {
-                                    toggle(false)
-                                }
-                            })
-                            if (pw == "no") SmallButton("Passwort-Anmeldung wieder einschalten", { toggle(true) })
-                        }
+                        if (pw.isNotBlank()) Text("Passwort-Anmeldung per SSH: ${if (pw == "yes") "an" else "aus"}", fontSize = TextSmall, fontWeight = Bold)
                         if (d["keys"].arr.isEmpty()) Text("Noch keine Schlüssel eingetragen.", fontSize = TextSmall)
                         d["keys"].arr.forEachIndexed { i, k ->
                             val fp = k["fingerprint"].str
@@ -181,17 +185,16 @@ fun SshKeysScreen(state: AppState, session: Session, top: app.servercontrol.ui.C
                                     Text(k["comment"].str.ifBlank { "(ohne Kommentar)" } + if (mine) "  · dieses Gerät" else "", fontWeight = Bold)
                                     Text("${k["type"].str}  $fp", fontSize = TextSmall)
                                 }
-                                TextButton(onClick = {
+                                GearMenu(listOf("Austragen …" to {
                                     confirm = Confirm("Schlüssel austragen?",
                                         "${k["comment"].str}\n$fp\n\n" + (if (mine) "Das ist der Schlüssel dieses Geräts – das Terminal braucht danach wieder das Passwort. " else "") +
                                             (if (pw == "no" && d["keys"].arr.size == 1) "ACHTUNG: Das ist der letzte Schlüssel und die Passwort-Anmeldung ist aus – danach ist kein SSH-Login mehr möglich!" else "")) {
                                         val body = buildJsonObject { put("user", user.trim()); put("fingerprint", fp) }.toString()
                                         host.run("Schlüssel austragen", { api.postRaw("/api/ssh/keys/remove", body); "Schlüssel entfernt." }, reload)
                                     }
-                                }) { Text("Austragen") }
+                                }))
                             }
                         }
-                        ButtonRow { SmallButton("Schlüssel eines anderen Geräts hinzufügen …", { addKey = true }) }
                     }
                 }
             }

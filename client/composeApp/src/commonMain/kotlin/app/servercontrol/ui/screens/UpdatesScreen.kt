@@ -1,5 +1,7 @@
 package app.servercontrol.ui.screens
 
+import kotlinx.coroutines.flow.first
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -41,6 +43,19 @@ fun UpdatesScreen(state: AppState, api: ApiClient) {
     val r = state.updateReport
     val modules = state.session?.modules.orEmpty()
     LaunchedEffect(Unit) { if (state.updateReport == null) state.checkUpdates() }
+    // page refresh: check again, including the package lists
+    var seenPage by remember { androidx.compose.runtime.mutableIntStateOf(PageRefresh.tick) }
+    LaunchedEffect(PageRefresh.tick) {
+        if (PageRefresh.tick == seenPage) return@LaunchedEffect
+        seenPage = PageRefresh.tick
+        PageRefresh.pending++
+        try {
+            state.checkUpdates(refreshLists = true)
+            androidx.compose.runtime.snapshotFlow { state.updatesChecking }.first { !it }
+        } finally {
+            PageRefresh.pending--
+        }
+    }
     val recheck = { state.checkUpdates() }
     Column(Modifier.fillMaxSize()) {
         ListHeader(
@@ -49,7 +64,7 @@ fun UpdatesScreen(state: AppState, api: ApiClient) {
                 r != null -> "Zuletzt geprüft um ${formatClock(r.checkedAt)}" + if (r.summary.isEmpty()) " · alles aktuell" else ""
                 else -> ""
             },
-        ) { RefreshButton { state.checkUpdates(refreshLists = true) } }
+        )
         if (state.updatesChecking) LinearProgressIndicator(Modifier.fillMaxWidth())
         if (r != null) CardColumn("cards.updates", Modifier.weight(1f)) {
             if (r.errors.isNotEmpty()) card("Prüfung") {
@@ -63,7 +78,12 @@ fun UpdatesScreen(state: AppState, api: ApiClient) {
             if (modules["immich"] == true) card("Immich") { ImmichUpdateCard(r, host, recheck) { confirm = it } }
             val sys = r.system
             card("Server") {
-                SectionCard("Server") {
+                SectionCard("Server", actions = {
+                    if (sys != null && sys.packages.isNotEmpty()) GearMenu(listOf(
+                        "Installieren …" to { confirm = Confirm("Updates installieren?", "apt-get upgrade für ${sys.packages.size} Pakete.") { host.post("Upgrade", "/api/system/updates/upgrade", after = recheck) } },
+                        "Full-Upgrade …" to { confirm = Confirm("Full-Upgrade ausführen?", "apt-get full-upgrade kann auch Pakete entfernen oder neu installieren.") { host.post("Full-Upgrade", "/api/system/updates/upgrade?mode=full", after = recheck) } },
+                    ))
+                }) {
                     if (sys == null) {
                         Text("Nicht verfügbar.", fontSize = TextSmall)
                         return@SectionCard
@@ -71,12 +91,6 @@ fun UpdatesScreen(state: AppState, api: ApiClient) {
                     if (sys.packages.isEmpty()) Text("System ist aktuell.", color = StatusOk)
                     else Text("${sys.packages.size} Updates verfügbar (${r.securityCount} Sicherheit)", fontWeight = Bold, color = StatusWarn)
                     if (sys.rebootRequired) Text("Neustart erforderlich.", color = StatusWarn)
-                    ButtonRow {
-                        if (sys.packages.isNotEmpty()) {
-                            SmallButton("Installieren", { confirm = Confirm("Updates installieren?", "apt-get upgrade für ${sys.packages.size} Pakete.") { host.post("Upgrade", "/api/system/updates/upgrade", after = recheck) } })
-                            SmallButton("Full-Upgrade", { confirm = Confirm("Full-Upgrade ausführen?", "apt-get full-upgrade kann auch Pakete entfernen oder neu installieren.") { host.post("Full-Upgrade", "/api/system/updates/upgrade?mode=full", after = recheck) } })
-                        }
-                    }
                     sys.packages.forEachIndexed { i, p ->
                         StripedItem(
                             i,
