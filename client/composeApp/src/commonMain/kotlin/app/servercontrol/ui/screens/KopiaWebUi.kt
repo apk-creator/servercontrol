@@ -127,7 +127,9 @@ internal fun KopiaSnapshotsTab(api: ApiClient, base: String, host: ActionHost, t
     // the snapshot history opens as its own page (see KopiaRepoDetail)
     LaunchedEffect(openSource) { openSource?.let { onOpenSource(it); openSource = null } }
     // "+" in the title row of the card (KopiaRepoPage) sets this state
-    var newSnap by (addState ?: remember { mutableStateOf(false) })
+    val ownAdd = remember { mutableStateOf(false) }
+    val newSnapState: androidx.compose.runtime.MutableState<Boolean> = addState ?: ownAdd
+    var newSnap by newSnapState
     var srcMenu by remember { mutableStateOf<JsonElement?>(null) }
     var refresh by remember { mutableStateOf(0) }
     // sources refresh by themselves while a snapshot is running
@@ -367,7 +369,9 @@ private fun KopiaBrowse(api: ApiClient, base: String, path: List<Pair<String, St
 
 @Composable
 internal fun KopiaPoliciesTab(api: ApiClient, base: String, host: ActionHost, tick: Int, open: KopiaTarget?, addState: androidx.compose.runtime.MutableState<Boolean>? = null, onOpen: (KopiaTarget?) -> Unit) {
-    var adding by (addState ?: remember { mutableStateOf(false) })
+    val ownAdd = remember { mutableStateOf(false) }
+    val addingState: androidx.compose.runtime.MutableState<Boolean> = addState ?: ownAdd
+    var adding by addingState
     var refresh by remember { mutableStateOf(0) }
     if (open != null) {
         BackHandler { onOpen(null) }

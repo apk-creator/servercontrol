@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import app.servercontrol.data.ServerProfile
 import app.servercontrol.ui.screens.*
 import kotlinx.coroutines.launch
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.ui.graphics.graphicsLayer
 import kotlinx.coroutines.flow.first
